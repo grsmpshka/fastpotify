@@ -1,0 +1,114 @@
+name: Android
+
+on:
+  push:
+    branches: [android-client, android-client-v2]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: android-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+  ANDROID_NDK_VERSION: 27.2.12479018
+
+jobs:
+  build-and-screenshot:
+    name: APK and deterministic screenshots
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+          cache: gradle
+
+      - uses: dtolnay/rust-toolchain@1.98.0
+        with:
+          targets: aarch64-linux-android,x86_64-linux-android
+          components: rustfmt
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: .
+          save-if: ${{ github.ref == 'refs/heads/android-client' }}
+
+      - name: Desktop check dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libasound2-dev libpulse-dev libxkbcommon-dev \
+            libwayland-dev libgl1-mesa-dev cmake libclang-dev
+
+      - name: Install Android SDK and Rust builder
+        run: |
+          yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses >/dev/null
+          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" \
+            "platforms;android-35" \
+            "build-tools;35.0.0" \
+            "ndk;$ANDROID_NDK_VERSION"
+          cargo install cargo-ndk --locked --version 3.5.4
+          echo "ANDROID_NDK_HOME=$ANDROID_HOME/ndk/$ANDROID_NDK_VERSION" >> "$GITHUB_ENV"
+
+      - name: Rust formatting
+        run: cargo fmt --all --check
+
+      - name: Rust workspace check
+        run: cargo check --locked --workspace --no-default-features
+
+      - name: Rust shared-core tests
+        run: cargo test --locked --package fastpotify-core
+
+      - name: Build debug APK
+        working-directory: android
+        run: ./gradlew --no-daemon :app:assembleDebug
+
+      - name: Prepare APK artifact
+        run: |
+          mkdir -p artifacts
+          cp android/app/build/outputs/apk/debug/app-debug.apk \
+            artifacts/fastpotify-android-debug.apk
+
+      - name: Run emulator screenshot suite
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 35
+          arch: x86_64
+          profile: pixel_6
+          disable-animations: true
+          emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none
+          script: |
+            cd android
+            ./gradlew --no-daemon :app:connectedDebugAndroidTest
+            cd ..
+            mkdir -p artifacts/screenshots
+            adb pull /sdcard/Download/FastpotifyScreenshots/. artifacts/screenshots/
+            test -s artifacts/screenshots/voyah-home.png
+            test -s artifacts/screenshots/voyah-playlist.png
+            test -s artifacts/screenshots/voyah-now-playing.png
+            test -s artifacts/screenshots/phone-home.png
+            test -s artifacts/screenshots/phone-now-playing.png
+
+      - name: Upload debug APK
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: fastpotify-android-debug.apk
+          path: artifacts/fastpotify-android-debug.apk
+          if-no-files-found: error
+
+      - name: Upload screenshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: screenshots
+          path: artifacts/screenshots/*.png
+          if-no-files-found: error

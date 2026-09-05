@@ -9,3 +9,14 @@ docs/.jekyll-cache/
 docs/vendor/
 docs/.bundle/
 .claude/
+
+# Local Android toolchains and generated Gradle/native outputs.
+/.tools/
+/.gradle/
+/android/.gradle/
+/android/local.properties
+/android/**/build/
+/android/app/src/main/jniLibs/
+/artifacts/
+*.jks
+*.keystore

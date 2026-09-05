@@ -1,0 +1,12 @@
+[package]
+name = "fastpotify-core"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.95"
+license = "MIT"
+description = "Platform-neutral application contracts for Fastpotify"
+publish = false
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"

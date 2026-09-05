@@ -1,0 +1,15 @@
+[package]
+name = "fastpotify-android"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.95"
+license = "MIT"
+description = "Thin Android JNI bridge for Fastpotify"
+publish = false
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+fastpotify-core = { path = "../fastpotify-core" }
+jni = "0.21"

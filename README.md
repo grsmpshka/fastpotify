@@ -15,6 +15,29 @@ cannot play music through Fastpotify on this computer or another device.
 See [fastpotify.rocks](https://fastpotify.rocks/) for installation, setup,
 everyday use, and connection details.
 
+## Android client (in development)
+
+The `android-client` branch contains one Android application with adaptive
+Voyah Free and phone interfaces. Milestone 1 is an offline, deterministic UI
+preview: it does not sign in, access the network, or start playback.
+
+The Android project lives in `android/`; its JNI library is built from
+`crates/fastpotify-android`, with shared contracts and demo data in
+`crates/fastpotify-core`. From the repository root, install the Rust Android
+targets and `cargo-ndk`, then build the debug APK with:
+
+```sh
+rustup target add aarch64-linux-android x86_64-linux-android
+cargo install cargo-ndk --locked --version 3.5.4
+cd android
+./gradlew :app:assembleDebug
+```
+
+Debug builds accept deterministic demo routes used by CI screenshot tests.
+Release builds do not enable that entry path. Playback, production OAuth,
+MediaSession, foreground service, and Spotify Connect are intentionally
+scheduled for later milestones.
+
 ## What it does
 
 - **Plays music on this computer.** Fastpotify appears as a Spotify Connect
