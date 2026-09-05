@@ -86,16 +86,14 @@ jobs:
           disable-animations: true
           emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none
           script: |
-            cd android
-            ./gradlew --no-daemon :app:connectedDebugAndroidTest
-            cd ..
-            mkdir -p artifacts/screenshots
-            adb pull /sdcard/Download/FastpotifyScreenshots/. artifacts/screenshots/
-            test -s artifacts/screenshots/voyah-home.png
-            test -s artifacts/screenshots/voyah-playlist.png
-            test -s artifacts/screenshots/voyah-now-playing.png
-            test -s artifacts/screenshots/phone-home.png
-            test -s artifacts/screenshots/phone-now-playing.png
+            ./android/gradlew -p android --no-daemon :app:connectedDebugAndroidTest
+            mkdir -p "$GITHUB_WORKSPACE/artifacts/screenshots"
+            adb pull /sdcard/Download/FastpotifyScreenshots/. "$GITHUB_WORKSPACE/artifacts/screenshots/"
+            test -s "$GITHUB_WORKSPACE/artifacts/screenshots/voyah-home.png"
+            test -s "$GITHUB_WORKSPACE/artifacts/screenshots/voyah-playlist.png"
+            test -s "$GITHUB_WORKSPACE/artifacts/screenshots/voyah-now-playing.png"
+            test -s "$GITHUB_WORKSPACE/artifacts/screenshots/phone-home.png"
+            test -s "$GITHUB_WORKSPACE/artifacts/screenshots/phone-now-playing.png"
 
       - name: Upload debug APK
         if: always()
