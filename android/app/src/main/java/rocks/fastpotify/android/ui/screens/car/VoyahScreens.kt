@@ -82,6 +82,7 @@ fun VoyahShell(
     currentScreen: AppScreen,
     onProfileSelected: (UiProfile) -> Unit,
     onScreenSelected: (AppScreen) -> Unit,
+    onCheckForUpdates: () -> Unit,
 ) {
     Row(
         modifier = Modifier
@@ -94,6 +95,7 @@ fun VoyahShell(
             currentScreen = currentScreen,
             onProfileSelected = onProfileSelected,
             onScreenSelected = onScreenSelected,
+            onCheckForUpdates = onCheckForUpdates,
         )
         Column(Modifier.weight(1f)) {
             Row(Modifier.weight(1f)) {
@@ -126,6 +128,7 @@ private fun VoyahSystemRail(
     currentScreen: AppScreen,
     onProfileSelected: (UiProfile) -> Unit,
     onScreenSelected: (AppScreen) -> Unit,
+    onCheckForUpdates: () -> Unit,
 ) {
     Column(
         modifier = Modifier
@@ -153,6 +156,7 @@ private fun VoyahSystemRail(
         ProfileSelector(
             profile = selectedProfile,
             onProfileSelected = onProfileSelected,
+            onCheckForUpdates = onCheckForUpdates,
             modifier = Modifier.padding(horizontal = 6.dp),
             showLabel = false,
         )

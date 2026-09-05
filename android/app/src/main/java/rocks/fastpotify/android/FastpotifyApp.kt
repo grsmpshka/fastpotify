@@ -1,5 +1,6 @@
 package rocks.fastpotify.android
 
+import android.app.Activity
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -18,6 +19,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -38,10 +40,17 @@ import rocks.fastpotify.android.ui.theme.Background
 import rocks.fastpotify.android.ui.theme.FastpotifyTheme
 import rocks.fastpotify.android.ui.theme.TextPrimary
 import rocks.fastpotify.android.ui.theme.TextSecondary
+import rocks.fastpotify.android.update.AndroidUpdater
+import rocks.fastpotify.android.update.UpdatePrompt
+import kotlinx.coroutines.launch
 
 @Composable
 fun FastpotifyApp(initialProfile: String?, initialScreen: String?) {
     val context = LocalContext.current
+    val activity = context as? Activity
+    val updateScope = rememberCoroutineScope()
+    val updater = remember(context) { AndroidUpdater(context.applicationContext) }
+    val isScreenshotCapture = BuildConfig.ENABLE_DEMO_MODE && initialProfile != null
     val profilePreferences = remember {
         context.getSharedPreferences("ui-profile", android.content.Context.MODE_PRIVATE)
     }
@@ -56,6 +65,17 @@ fun FastpotifyApp(initialProfile: String?, initialScreen: String?) {
         if (initialProfile == null) {
             profilePreferences.edit().putString("selected", profile.wireValue).apply()
         }
+    }
+
+    LaunchedEffect(isScreenshotCapture) {
+        if (!isScreenshotCapture && updater.shouldCheckAutomatically()) {
+            updater.check(manual = false)
+        }
+    }
+
+    val checkForUpdates: () -> Unit = {
+        updateScope.launch { updater.check(manual = true) }
+        Unit
     }
 
     val snapshotResult = remember {
@@ -91,6 +111,7 @@ fun FastpotifyApp(initialProfile: String?, initialScreen: String?) {
                                 currentScreen = screen,
                                 onProfileSelected = { profile = it },
                                 onScreenSelected = { screen = it },
+                                onCheckForUpdates = checkForUpdates,
                             )
                             ResolvedProfile.Phone -> PhoneShell(
                                 snapshot = snapshot,
@@ -98,12 +119,23 @@ fun FastpotifyApp(initialProfile: String?, initialScreen: String?) {
                                 currentScreen = screen,
                                 onProfileSelected = { profile = it },
                                 onScreenSelected = { screen = it },
+                                onCheckForUpdates = checkForUpdates,
                             )
                         }
                     }
                 } else {
                     CoreUnavailable(snapshotResult.exceptionOrNull()?.message)
                 }
+                UpdatePrompt(
+                    state = updater.state,
+                    onDownload = { release ->
+                        updateScope.launch { updater.download(release) }
+                    },
+                    onInstall = { ready ->
+                        if (activity != null) updater.install(activity, ready)
+                    },
+                    onDismiss = updater::dismiss,
+                )
             }
         }
     }

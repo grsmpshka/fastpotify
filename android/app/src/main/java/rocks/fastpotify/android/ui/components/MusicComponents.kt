@@ -42,6 +42,7 @@ import androidx.compose.material.icons.filled.Shuffle
 import androidx.compose.material.icons.filled.SkipNext
 import androidx.compose.material.icons.filled.SkipPrevious
 import androidx.compose.material.icons.filled.Smartphone
+import androidx.compose.material.icons.filled.SystemUpdate
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.FilterChip
@@ -405,6 +406,7 @@ fun PlayerUtilityActions(nowPlaying: NowPlaying, modifier: Modifier = Modifier) 
 fun ProfileSelector(
     profile: UiProfile,
     onProfileSelected: (UiProfile) -> Unit,
+    onCheckForUpdates: () -> Unit,
     modifier: Modifier = Modifier,
     showLabel: Boolean = true,
 ) {
@@ -441,6 +443,14 @@ fun ProfileSelector(
                     },
                 )
             }
+            DropdownMenuItem(
+                text = { Text("Проверить обновления") },
+                leadingIcon = { Icon(Icons.Default.SystemUpdate, null) },
+                onClick = {
+                    expanded = false
+                    onCheckForUpdates()
+                },
+            )
         }
     }
 }

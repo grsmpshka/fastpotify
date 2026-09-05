@@ -1,0 +1,86 @@
+name: Android release
+
+on:
+  push:
+    tags: ["v*-android.*"]
+
+permissions:
+  contents: write
+
+env:
+  CARGO_TERM_COLOR: always
+  ANDROID_NDK_VERSION: 27.2.12479018
+
+jobs:
+  publish:
+    name: Signed APK and GitHub prerelease
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+          cache: gradle
+
+      - uses: dtolnay/rust-toolchain@1.98.0
+        with:
+          targets: aarch64-linux-android,x86_64-linux-android
+          components: rustfmt,clippy
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: .
+
+      - name: Install Android SDK and Rust builder
+        run: |
+          yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses >/dev/null
+          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" \
+            "platforms;android-35" \
+            "build-tools;35.0.0" \
+            "ndk;$ANDROID_NDK_VERSION"
+          cargo install cargo-ndk --locked --version 3.5.4
+          echo "ANDROID_NDK_HOME=$ANDROID_HOME/ndk/$ANDROID_NDK_VERSION" >> "$GITHUB_ENV"
+
+      - name: Restore release signing key
+        env:
+          KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+        run: |
+          test -n "$KEYSTORE_BASE64"
+          printf '%s' "$KEYSTORE_BASE64" | base64 --decode > "$RUNNER_TEMP/fastpotify-release.jks"
+
+      - name: Verify shared code
+        run: |
+          cargo fmt --all --check
+          cargo clippy --locked -p fastpotify-core -p fastpotify-android --all-targets -- -D warnings
+          cargo test --locked -p fastpotify-core
+
+      - name: Build signed release APK
+        working-directory: android
+        env:
+          STORE_PASSWORD: ${{ secrets.ANDROID_STORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          ./gradlew --no-daemon :app:lintRelease :app:assembleRelease \
+            -PfastpotifyStoreFile="$RUNNER_TEMP/fastpotify-release.jks" \
+            -PfastpotifyStorePassword="$STORE_PASSWORD" \
+            -PfastpotifyKeyAlias="$KEY_ALIAS" \
+            -PfastpotifyKeyPassword="$KEY_PASSWORD"
+
+      - name: Prepare release files
+        run: |
+          mkdir -p dist
+          cp android/app/build/outputs/apk/release/app-release.apk dist/fastpotify-android.apk
+          cd dist
+          sha256sum fastpotify-android.apk > checksums.txt
+
+      - uses: softprops/action-gh-release@v2
+        with:
+          prerelease: true
+          body_path: android/RELEASE_NOTES.md
+          files: |
+            dist/fastpotify-android.apk
+            dist/checksums.txt

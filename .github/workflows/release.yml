@@ -12,6 +12,7 @@ env:
 
 jobs:
   build:
+    if: ${{ !contains(github.ref_name, '-android.') }}
     name: build (${{ matrix.target }})
     runs-on: ${{ matrix.os }}
     env:
@@ -128,6 +129,7 @@ jobs:
           if-no-files-found: error
 
   macos:
+    if: ${{ !contains(github.ref_name, '-android.') }}
     name: macOS universal app
     runs-on: macos-latest
     env:
@@ -220,6 +222,7 @@ jobs:
   flatpak:
     name: Flatpak bundle
     needs: build
+    if: ${{ !contains(github.ref_name, '-android.') && needs.build.result == 'success' }}
     runs-on: ubuntu-latest
     container:
       image: ghcr.io/flathub-infra/flatpak-github-actions:freedesktop-24.08
@@ -251,7 +254,7 @@ jobs:
     # The bundle is welcome but not required: a Flatpak failure must not
     # hold the release.
     needs: [build, macos, flatpak]
-    if: ${{ !cancelled() && needs.build.result == 'success' && needs.macos.result == 'success' }}
+    if: ${{ !contains(github.ref_name, '-android.') && !cancelled() && needs.build.result == 'success' && needs.macos.result == 'success' }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/download-artifact@v7

@@ -14,8 +14,12 @@ android {
         applicationId = "rocks.fastpotify.android"
         minSdk = 26
         targetSdk = 35
-        versionCode = 1
-        versionName = "0.1.0"
+        versionCode = 600001
+        versionName = "0.6.0-android.1"
+
+        ndk {
+            abiFilters += setOf("arm64-v8a", "x86_64")
+        }
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
@@ -43,6 +47,15 @@ android {
         release {
             isMinifyEnabled = false
             buildConfigField("boolean", "ENABLE_DEMO_MODE", "false")
+            val storePath = providers.gradleProperty("fastpotifyStoreFile").orNull
+            if (storePath != null) {
+                signingConfig = signingConfigs.create("fastpotifyRelease") {
+                    storeFile = file(storePath)
+                    storePassword = providers.gradleProperty("fastpotifyStorePassword").get()
+                    keyAlias = providers.gradleProperty("fastpotifyKeyAlias").get()
+                    keyPassword = providers.gradleProperty("fastpotifyKeyPassword").get()
+                }
+            }
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro",
@@ -103,6 +116,7 @@ dependencies {
     implementation("androidx.compose.ui:ui-tooling-preview")
     implementation("androidx.lifecycle:lifecycle-runtime-compose:2.8.7")
     implementation("androidx.lifecycle:lifecycle-viewmodel-compose:2.8.7")
+    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.9.0")
 
     debugImplementation("androidx.compose.ui:ui-tooling")
     debugImplementation("androidx.compose.ui:ui-test-manifest")

@@ -76,6 +76,7 @@ fun PhoneShell(
     currentScreen: AppScreen,
     onProfileSelected: (UiProfile) -> Unit,
     onScreenSelected: (AppScreen) -> Unit,
+    onCheckForUpdates: () -> Unit,
 ) {
     if (currentScreen == AppScreen.NowPlaying) {
         PhoneNowPlaying(snapshot, onBack = { onScreenSelected(AppScreen.Home) })
@@ -96,7 +97,12 @@ fun PhoneShell(
                     }
                 },
                 actions = {
-                    ProfileSelector(selectedProfile, onProfileSelected, Modifier.padding(end = 8.dp))
+                    ProfileSelector(
+                        selectedProfile,
+                        onProfileSelected,
+                        onCheckForUpdates,
+                        Modifier.padding(end = 8.dp),
+                    )
                 },
             )
         },

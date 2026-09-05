@@ -15,11 +15,20 @@ cannot play music through Fastpotify on this computer or another device.
 See [fastpotify.rocks](https://fastpotify.rocks/) for installation, setup,
 everyday use, and connection details.
 
-## Android client (in development)
+## Android client (preview)
 
 The `android-client` branch contains one Android application with adaptive
-Voyah Free and phone interfaces. Milestone 1 is an offline, deterministic UI
-preview: it does not sign in, access the network, or start playback.
+Voyah Free and phone interfaces. Milestone 1 is a deterministic UI preview:
+it does not sign in or start playback. Network access is currently used only
+to check and download updates from this GitHub fork.
+
+**[Download Fastpotify for Android](https://github.com/grsmpshka/fastpotify/releases/download/v0.6.0-android.1/fastpotify-android.apk)**
+
+The same APK supports arm64 phones and automotive displays. Android may ask
+you to allow installs from Fastpotify before the first in-app update. The app
+checks for a newer Android preview at most once a day; open the profile menu
+and choose **Check for updates** to check manually. Every downloaded APK is
+accepted only after its GitHub SHA-256 digest and signing certificate match.
 
 The Android project lives in `android/`; its JNI library is built from
 `crates/fastpotify-android`, with shared contracts and demo data in

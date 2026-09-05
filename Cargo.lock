@@ -1713,7 +1713,7 @@ dependencies = [
 
 [[package]]
 name = "fastpotify"
-version = "0.6.0"
+version = "0.6.0-android.1"
 dependencies = [
  "aes",
  "anyhow",
@@ -1774,7 +1774,7 @@ dependencies = [
 
 [[package]]
 name = "fastpotify-android"
-version = "0.1.0"
+version = "0.6.0-android.1"
 dependencies = [
  "fastpotify-core",
  "jni 0.21.1",
@@ -1782,7 +1782,7 @@ dependencies = [
 
 [[package]]
 name = "fastpotify-core"
-version = "0.1.0"
+version = "0.6.0-android.1"
 dependencies = [
  "serde",
  "serde_json",
