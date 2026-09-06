@@ -22,6 +22,8 @@ const BASE_URL: &str = "https://api.spotify.com/v1";
 const MAX_IN_FLIGHT: usize = 6;
 const RATE_LIMIT_RETRIES: u32 = 3;
 const MAX_RETRY_AFTER: Duration = Duration::from_secs(30);
+const MAX_SEARCH_LIMIT: u32 = 10;
+const MAX_PLAYLIST_ITEMS_LIMIT: u32 = 50;
 
 #[derive(Clone, Debug, Error)]
 pub enum ApiError {
@@ -285,7 +287,7 @@ impl ApiClient {
             tokens: Mutex::new(None),
             limiter: Semaphore::new(MAX_IN_FLIGHT),
             cooldown_until: tokio::sync::Mutex::new(Instant::now()),
-            search_limit,
+            search_limit: search_limit.min(MAX_SEARCH_LIMIT),
             artist_albums_limit,
             source,
             activity,
@@ -637,15 +639,21 @@ impl ApiClient {
         offset: u32,
         limit: u32,
     ) -> Result<Page<PlaylistItem>> {
-        self.get(
-            &format!("/playlists/{id}/items"),
-            &[
-                ("limit", limit.to_string()),
-                ("offset", offset.to_string()),
-                ("additional_types", "track,episode".to_string()),
-            ],
-        )
-        .await
+        let query = [
+            ("limit", limit.min(MAX_PLAYLIST_ITEMS_LIMIT).to_string()),
+            ("offset", offset.to_string()),
+            ("additional_types", "track,episode".to_string()),
+        ];
+        let current = self.get(&format!("/playlists/{id}/items"), &query).await;
+        match current {
+            // Spotify's current endpoint is restricted to owned and
+            // collaborative playlists. The deprecated route remains the
+            // compatibility path for Spotify-owned catalogue playlists.
+            Err(ApiError::Status { status: 403, .. }) => {
+                self.get(&format!("/playlists/{id}/tracks"), &query).await
+            }
+            result => result,
+        }
     }
 
     /// Requested songs already present in a playlist.
@@ -1068,5 +1076,18 @@ mod tests {
         shared.extend_cooldown(Duration::from_secs(10)).await;
         assert!(*shared.cooldown_until.lock().await > Instant::now());
         assert!(*personal.cooldown_until.lock().await <= Instant::now());
+    }
+
+    #[test]
+    fn spotify_request_limits_are_clamped_at_the_transport_boundary() {
+        let client = ApiClient::new(
+            reqwest::Client::new(),
+            Arc::new(NetActivity::default()),
+            50,
+            50,
+            ApiSource::Shared,
+        );
+        assert_eq!(client.search_limit, MAX_SEARCH_LIMIT);
+        assert_eq!(100_u32.min(MAX_PLAYLIST_ITEMS_LIMIT), 50);
     }
 }

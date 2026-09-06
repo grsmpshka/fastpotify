@@ -2,7 +2,7 @@ name: Android
 
 on:
   push:
-    branches: [android-client, android-client-v2]
+    branches: [main, android-client, android-client-v2]
   pull_request:
   workflow_dispatch:
 

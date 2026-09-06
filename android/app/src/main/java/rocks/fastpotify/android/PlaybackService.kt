@@ -48,6 +48,7 @@ class PlaybackService : Service() {
 
     override fun onCreate() {
         super.onCreate()
+        runCatching { NativeBridge.initialize(filesDir.absolutePath, application) }
         createChannel()
         imageLoader = ImageLoader(this)
         session = MediaSession(this, "Fastpotify").apply {

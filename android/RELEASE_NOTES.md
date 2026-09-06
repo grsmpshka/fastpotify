@@ -1,23 +1,20 @@
-This Android preview focuses on reliability. Playback setup is now explicit, repeated Spotify items no longer crash long lists, and the home page contains the personalised shelves available to Fastpotify.
-
-## New
-
-- **Made for You is populated.** Discover Weekly, Release Radar, Daily Mix, and daylist use the same Spotify searches and filtering rules as the desktop client.
-- **More personal shelves.** The home page now shows top artists, recent listening, top tracks, and seeded recommendations as artwork cards.
-- **Functional parity is tracked.** A desktop-to-Android audit now records implemented features, platform differences, known gaps, and the release checks that cover them.
+This Android preview fixes the broken Spotify request limits that prevented search and playlist pages from working, and makes local playback survive Android screen and service recreation.
 
 ## Fixed
 
-- **Long lists stay open.** Repeated tracks in history, playlists, and the queue now receive distinct Compose identities instead of crashing when scrolled into view.
-- **The first song starts after setup.** If no Spotify player is active, tapping a song starts the separate librespot authorization and remembers the request until the Android player connects.
-- **Playlist playback keeps its context.** Choosing a row loads its playlist, album, or Liked Songs context at that track instead of reducing it to an isolated item.
-- **Android uses the correct Connect identity.** The local receiver now registers as a smartphone and opens the same tested CPAL/rodio output used by the shared Fastpotify engine.
-- **Playback errors are visible.** Local and Spotify command failures appear near the top of Home and on the player instead of below several long sections.
-- **Artwork uses bounded memory.** Notification artwork is decoded at a controlled size to reduce background memory pressure.
-- **Notification permission no longer interrupts sign-in.** Android asks only after the local player has connected.
+- **Playlists open again.** Playlist pages now request Spotify's supported page size and use the compatibility endpoint when Spotify restricts the current endpoint for catalogue playlists.
+- **Search returns results.** Search uses Spotify's current per-type limit, runs after typing, and retries compatible content groups if one market-specific type is rejected.
+- **The library appears first.** Playlists and saved tracks no longer wait for recommendations, history, podcasts, and other optional home shelves.
+- **Failures no longer look like endless loading.** A failed playlist page shows Spotify's actual error and a way back.
+- **Playback survives Android recreation.** Activity and foreground-service startup reuse the existing native runtime instead of replacing the librespot session.
+- **Long lists remain stable.** The scrolling stress suite still covers duplicate tracks, playlists, queue rows, and repeated recomposition.
+
+## New
+
+- **Search is useful before typing.** Top tracks and artists appear as initial suggestions when Spotify has loaded them.
 
 ## Thanks
 
-Thanks to the user who reported the playback failure, scrolling crashes, and missing personalised playlists, and to the Fastpotify and librespot contributors whose shared client and audio engine power this release.
+Thanks to the user who reported the real-device failures and insisted that the Android port be checked against actual Spotify behavior, and to the Fastpotify and librespot contributors whose shared client and playback engine power the app.
 
-Full changelog: `v0.6.0-android.2...v0.6.0-android.3`
+Full changelog: `v0.6.0-android.3...v0.6.0-android.4`

@@ -98,10 +98,12 @@ pub extern "system" fn Java_rocks_fastpotify_android_NativeBridge_initialize(
             .map_err(|error| error.to_string())?
             .to_string_lossy()
             .into_owned();
-        let client = MobileClient::new(files_dir).map_err(|error| error.to_string())?;
-        *mobile_client()
+        let mut guard = mobile_client()
             .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner()) = Some(client);
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        if guard.is_none() {
+            *guard = Some(MobileClient::new(files_dir).map_err(|error| error.to_string())?);
+        }
         Ok::<_, String>(())
     }));
     if let Err(message) = flatten(result) {

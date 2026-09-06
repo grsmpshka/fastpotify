@@ -28,6 +28,13 @@ and Omarchy Spotify. Spotify divides its quota among all users. A personal app
 adds a separate Development Mode quota. See
 [Use a Personal Spotify App](/make-it-even-faster/).
 
+Library playlists are loaded before lower-priority home shelves so a slow
+recommendation request cannot hold the main interface open. Spotify limits
+search results to ten items per requested type and playlist pages to fifty
+items; Fastpotify clamps both values before sending a request. For
+Spotify-owned catalogue playlists, it falls back to Spotify's deprecated
+`/tracks` compatibility route when the current `/items` route returns 403.
+
 ## What the client stores
 
 - Shared and personal Web API refresh tokens, plus librespot's credential, in

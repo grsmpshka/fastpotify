@@ -264,10 +264,13 @@ impl MobileClient {
 
             match result {
                 Ok((api, dashboard)) => {
-                    let mut guard = lock(&state);
-                    guard.api = Some(api);
-                    guard.snapshot.auth_status = AuthState::SignedIn;
-                    apply_dashboard(&mut guard.snapshot, dashboard);
+                    {
+                        let mut guard = lock(&state);
+                        guard.api = Some(Arc::clone(&api));
+                        guard.snapshot.auth_status = AuthState::SignedIn;
+                        apply_dashboard(&mut guard.snapshot, dashboard);
+                    }
+                    refresh_enrichment(&api, &state).await;
                 }
                 Err(error) => {
                     let mut guard = lock(&state);
@@ -372,9 +375,12 @@ impl MobileClient {
         self.runtime.spawn(async move {
             match fetch_dashboard(&api).await {
                 Ok(data) => {
-                    let mut guard = lock(&state);
-                    guard.snapshot.auth_status = AuthState::SignedIn;
-                    apply_dashboard(&mut guard.snapshot, data);
+                    {
+                        let mut guard = lock(&state);
+                        guard.snapshot.auth_status = AuthState::SignedIn;
+                        apply_dashboard(&mut guard.snapshot, data);
+                    }
+                    refresh_enrichment(&api, &state).await;
                 }
                 Err(error) => finish_error(&state, error),
             }
@@ -385,33 +391,40 @@ impl MobileClient {
         let Some(api) = self.api() else {
             return;
         };
+        let query = query.trim().to_string();
         {
             let mut state = lock(&self.state);
             state.snapshot.search_query = query.clone();
-            state.snapshot.busy = true;
+            state.snapshot.search_results.clear();
+            state.snapshot.busy = !query.is_empty();
             state.snapshot.error = None;
             bump(&mut state.snapshot);
         }
+        if query.is_empty() {
+            return;
+        }
         let state = Arc::clone(&self.state);
         self.runtime.spawn(async move {
-            let result = api
-                .search(
-                    &query,
-                    &["track", "artist", "album", "playlist", "show", "episode"],
-                )
-                .await;
+            let result = resilient_search(&api, &query).await;
             match result {
                 Ok(results) => {
                     let mut guard = lock(&state);
                     // Do not let an older request replace results for newer text.
                     if guard.snapshot.search_query == query {
-                        guard.snapshot.search_results = map_search(results);
+                        guard.snapshot.search_results = results;
                         guard.snapshot.busy = false;
                         guard.snapshot.error = None;
                         bump(&mut guard.snapshot);
                     }
                 }
-                Err(error) => finish_error(&state, format!("Поиск не выполнен: {error}")),
+                Err(error) => {
+                    let mut guard = lock(&state);
+                    if guard.snapshot.search_query == query {
+                        guard.snapshot.busy = false;
+                        guard.snapshot.error = Some(format!("Поиск не выполнен: {error}"));
+                        bump(&mut guard.snapshot);
+                    }
+                }
             }
         });
     }
@@ -424,22 +437,68 @@ impl MobileClient {
         let Some(api) = self.api() else {
             return;
         };
-        self.set_busy();
+        {
+            let mut state = lock(&self.state);
+            state.snapshot.opened_playlist = None;
+            state.snapshot.busy = true;
+            state.snapshot.error = None;
+            bump(&mut state.snapshot);
+        }
+        let fallback = {
+            let state = lock(&self.state);
+            state
+                .snapshot
+                .playlists
+                .iter()
+                .chain(state.snapshot.search_results.iter())
+                .chain(state.snapshot.library_items.iter())
+                .chain(state.snapshot.made_for_you.iter())
+                .chain(state.snapshot.top_artists.iter())
+                .find(|card| card.id == id && card.kind == kind)
+                .cloned()
+        };
         let state = Arc::clone(&self.state);
         self.runtime.spawn(async move {
             let result = async {
                 match kind.as_str() {
                     "playlist" => {
                         let (playlist, items) =
-                            tokio::try_join!(api.playlist(&id), api.playlist_items(&id, 0, 100),)
-                                .map_err(|error| error.to_string())?;
+                            tokio::join!(api.playlist(&id), api.playlist_items(&id, 0, 50));
+                        let items = items.map_err(|error| error.to_string())?;
+                        let playlist = playlist.ok();
                         Ok(LivePlaylist {
-                            id: playlist.id.clone(),
-                            uri: playlist.uri.clone(),
-                            title: playlist.name.clone(),
-                            description: playlist.description.clone().unwrap_or_default(),
-                            owner: playlist.owner_name().to_string(),
-                            image_url: image_url(&playlist.images),
+                            id: playlist
+                                .as_ref()
+                                .map(|item| item.id.clone())
+                                .filter(|value| !value.is_empty())
+                                .unwrap_or_else(|| id.clone()),
+                            uri: playlist
+                                .as_ref()
+                                .map(|item| item.uri.clone())
+                                .filter(|value| !value.is_empty())
+                                .or_else(|| fallback.as_ref().map(|card| card.uri.clone()))
+                                .unwrap_or_else(|| format!("spotify:playlist:{id}")),
+                            title: playlist
+                                .as_ref()
+                                .map(|item| item.name.clone())
+                                .filter(|value| !value.is_empty())
+                                .or_else(|| fallback.as_ref().map(|card| card.title.clone()))
+                                .unwrap_or_else(|| "Плейлист".into()),
+                            description: playlist
+                                .as_ref()
+                                .and_then(|item| item.description.clone())
+                                .unwrap_or_default(),
+                            owner: playlist
+                                .as_ref()
+                                .map(|item| item.owner_name().to_string())
+                                .or_else(|| fallback.as_ref().map(|card| card.subtitle.clone()))
+                                .unwrap_or_else(|| "Spotify".into()),
+                            image_url: playlist
+                                .as_ref()
+                                .and_then(|item| image_url(&item.images))
+                                .or_else(|| {
+                                    fallback.as_ref().and_then(|card| card.image_url.clone())
+                                }),
                             total: items.total,
                             tracks: items
                                 .items
@@ -814,39 +873,50 @@ struct DashboardData {
     user: LiveUser,
     playlists: Vec<LiveCard>,
     saved_tracks: Vec<LiveTrack>,
-    library_items: Vec<LiveCard>,
-    made_for_you: Vec<LiveCard>,
-    top_artists: Vec<LiveCard>,
-    top_tracks: Vec<LiveTrack>,
-    recommendations: Vec<LiveTrack>,
-    recent_tracks: Vec<LiveTrack>,
     now_playing: Option<LiveNowPlaying>,
     queue: Vec<LiveTrack>,
     devices: Vec<LiveDevice>,
 }
 
+struct EnrichmentData {
+    library_items: Vec<LiveCard>,
+    top_artists: Vec<LiveCard>,
+    top_tracks: Vec<LiveTrack>,
+    recent_tracks: Vec<LiveTrack>,
+}
+
 async fn fetch_dashboard(api: &Arc<ApiClient>) -> std::result::Result<DashboardData, String> {
     let user = api.me().await.map_err(|error| error.to_string())?;
-    let (
-        playlists,
-        saved,
-        albums,
-        artists,
-        shows,
-        episodes,
-        top,
-        top_artists,
-        recent,
-        playback,
-        queue,
-        devices,
-        discover_weekly,
-        release_radar,
-        daily_mix,
-        daylist,
-    ) = tokio::join!(
+    let (playlists, saved, playback, queue, devices) = tokio::join!(
         api.my_playlists(0, 50),
         api.saved_tracks(0, 50),
+        api.playback_state(),
+        api.queue(),
+        api.devices(),
+    );
+    let playlists = playlists.map_err(|error| format!("Плейлисты не загружены: {error}"))?;
+    Ok(DashboardData {
+        user: map_user(&user),
+        playlists: playlists.items.iter().map(map_playlist).collect(),
+        saved_tracks: saved
+            .unwrap_or_default()
+            .items
+            .iter()
+            .map(|saved| map_track(&saved.track))
+            .collect(),
+        now_playing: playback.ok().flatten().and_then(map_playback),
+        queue: queue
+            .map(|queue| queue.queue)
+            .unwrap_or_default()
+            .iter()
+            .map(map_playable)
+            .collect(),
+        devices: devices.unwrap_or_default().iter().map(map_device).collect(),
+    })
+}
+
+async fn fetch_enrichment(api: &Arc<ApiClient>) -> EnrichmentData {
+    let (albums, artists, shows, episodes, top, top_artists, recent) = tokio::join!(
         api.saved_albums(0, 50),
         api.followed_artists(None, 50),
         api.saved_shows(0, 50),
@@ -854,27 +924,8 @@ async fn fetch_dashboard(api: &Arc<ApiClient>) -> std::result::Result<DashboardD
         api.top_tracks("medium_term", 20, 0),
         api.top_artists("medium_term", 20),
         api.recently_played(30, None, None),
-        api.playback_state(),
-        api.queue(),
-        api.devices(),
-        api.search("Discover Weekly", &["playlist"]),
-        api.search("Release Radar", &["playlist"]),
-        api.search("Daily Mix", &["playlist"]),
-        api.search("daylist", &["playlist"]),
     );
     let top_tracks = top.unwrap_or_default().items;
-    let seed_tracks: Vec<String> = top_tracks
-        .iter()
-        .filter_map(|track| track.id.clone())
-        .take(5)
-        .collect();
-    let recommendations = if seed_tracks.is_empty() {
-        Vec::new()
-    } else {
-        api.recommendations(&seed_tracks, &[], 20)
-            .await
-            .unwrap_or_default()
-    };
     let mut library_items = Vec::new();
     library_items.extend(
         albums
@@ -905,27 +956,8 @@ async fn fetch_dashboard(api: &Arc<ApiClient>) -> std::result::Result<DashboardD
                 kind: "episode".into(),
             }),
     );
-    Ok(DashboardData {
-        user: map_user(&user),
-        playlists: playlists
-            .unwrap_or_default()
-            .items
-            .iter()
-            .map(map_playlist)
-            .collect(),
-        saved_tracks: saved
-            .unwrap_or_default()
-            .items
-            .iter()
-            .map(|saved| map_track(&saved.track))
-            .collect(),
+    EnrichmentData {
         library_items,
-        made_for_you: made_for_you([
-            ("Discover Weekly", discover_weekly.ok()),
-            ("Release Radar", release_radar.ok()),
-            ("Daily Mix", daily_mix.ok()),
-            ("daylist", daylist.ok()),
-        ]),
         top_artists: top_artists
             .unwrap_or_default()
             .items
@@ -933,40 +965,132 @@ async fn fetch_dashboard(api: &Arc<ApiClient>) -> std::result::Result<DashboardD
             .map(map_artist)
             .collect(),
         top_tracks: top_tracks.iter().map(map_track).collect(),
-        recommendations: recommendations.iter().map(map_track).collect(),
         recent_tracks: recent
             .unwrap_or_default()
             .items
             .iter()
             .map(|played| map_track(&played.track))
             .collect(),
-        now_playing: playback.ok().flatten().and_then(map_playback),
-        queue: queue
-            .map(|queue| queue.queue)
-            .unwrap_or_default()
-            .iter()
-            .map(map_playable)
-            .collect(),
-        devices: devices.unwrap_or_default().iter().map(map_device).collect(),
-    })
+    }
 }
 
 fn apply_dashboard(snapshot: &mut LiveSnapshot, data: DashboardData) {
     snapshot.user = Some(data.user);
     snapshot.playlists = data.playlists;
     snapshot.saved_tracks = data.saved_tracks;
-    snapshot.library_items = data.library_items;
-    snapshot.made_for_you = data.made_for_you;
-    snapshot.top_artists = data.top_artists;
-    snapshot.top_tracks = data.top_tracks;
-    snapshot.recommendations = data.recommendations;
-    snapshot.recent_tracks = data.recent_tracks;
     snapshot.now_playing = data.now_playing;
     snapshot.queue = data.queue;
     snapshot.devices = data.devices;
     snapshot.busy = false;
     snapshot.error = None;
     bump(snapshot);
+}
+
+async fn refresh_enrichment(api: &Arc<ApiClient>, state: &Arc<Mutex<State>>) {
+    // Let the first library snapshot reach the UI before lower-priority
+    // shelves start consuming the shared Spotify request budget.
+    tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+    let data = fetch_enrichment(api).await;
+    {
+        let mut guard = lock(state);
+        guard.snapshot.library_items = data.library_items;
+        guard.snapshot.top_artists = data.top_artists;
+        guard.snapshot.top_tracks = data.top_tracks;
+        guard.snapshot.recent_tracks = data.recent_tracks;
+        bump(&mut guard.snapshot);
+    }
+    refresh_discovery(api, state).await;
+}
+
+/// Personal shelves are deliberately loaded after the library. The shared
+/// Spotify application has one rate-limit bucket, so these optional requests
+/// must never hold playlists, search, or the basic player UI hostage.
+async fn refresh_discovery(api: &Arc<ApiClient>, state: &Arc<Mutex<State>>) {
+    tokio::time::sleep(std::time::Duration::from_millis(750)).await;
+    let seed_tracks: Vec<String> = {
+        let guard = lock(state);
+        guard
+            .snapshot
+            .top_tracks
+            .iter()
+            .map(|track| track.id.clone())
+            .filter(|id| !id.is_empty())
+            .take(5)
+            .collect()
+    };
+    let (discover_weekly, release_radar, daily_mix, daylist, recommendations) = tokio::join!(
+        api.search("Discover Weekly", &["playlist"]),
+        api.search("Release Radar", &["playlist"]),
+        api.search("Daily Mix", &["playlist"]),
+        api.search("daylist", &["playlist"]),
+        async {
+            if seed_tracks.is_empty() {
+                Ok(Vec::new())
+            } else {
+                api.recommendations(&seed_tracks, &[], 20).await
+            }
+        },
+    );
+    let cards = made_for_you([
+        ("Discover Weekly", discover_weekly.ok()),
+        ("Release Radar", release_radar.ok()),
+        ("Daily Mix", daily_mix.ok()),
+        ("daylist", daylist.ok()),
+    ]);
+    let tracks = recommendations
+        .unwrap_or_default()
+        .iter()
+        .map(map_track)
+        .collect();
+    let mut guard = lock(state);
+    guard.snapshot.made_for_you = cards;
+    guard.snapshot.recommendations = tracks;
+    bump(&mut guard.snapshot);
+}
+
+async fn resilient_search(
+    api: &Arc<ApiClient>,
+    query: &str,
+) -> std::result::Result<Vec<LiveCard>, String> {
+    const TYPES: &[&str] = &["track", "artist", "album", "playlist", "show", "episode"];
+    match api.search(query, TYPES).await {
+        Ok(results) => Ok(map_search(results)),
+        Err(primary_error) => {
+            if !matches!(
+                primary_error,
+                crate::api::client::ApiError::Status {
+                    status: 400 | 403,
+                    ..
+                } | crate::api::client::ApiError::Decode(_)
+            ) {
+                return Err(primary_error.to_string());
+            }
+            // Spotify can disable individual content types for an application
+            // or market. One rejected type must not leave the entire page blank.
+            let (tracks, artists, albums, playlists, shows, episodes) = tokio::join!(
+                api.search(query, &["track"]),
+                api.search(query, &["artist"]),
+                api.search(query, &["album"]),
+                api.search(query, &["playlist"]),
+                api.search(query, &["show"]),
+                api.search(query, &["episode"]),
+            );
+            let mut cards = Vec::new();
+            let mut succeeded = false;
+            for result in [tracks, artists, albums, playlists, shows, episodes]
+                .into_iter()
+                .flatten()
+            {
+                succeeded = true;
+                cards.extend(map_search(result));
+            }
+            if succeeded {
+                Ok(cards)
+            } else {
+                Err(primary_error.to_string())
+            }
+        }
+    }
 }
 
 fn playback_config(files_dir: &Path, settings: &MobileSettings) -> EngineConfig {
@@ -1072,7 +1196,7 @@ fn api_client(http: &reqwest::Client, token: StoredToken, path: &Path) -> Arc<Ap
     let client = Arc::new(ApiClient::new(
         http.clone(),
         Arc::new(NetActivity::default()),
-        20,
+        10,
         20,
         ApiSource::Shared,
     ));

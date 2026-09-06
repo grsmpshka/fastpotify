@@ -92,6 +92,7 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.platform.LocalContext
 import androidx.core.content.ContextCompat
+import kotlinx.coroutines.delay
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.testTag
 import androidx.compose.ui.text.font.FontWeight
@@ -385,7 +386,7 @@ private fun ScreenContent(
         LiveScreen.Home -> HomeScreen(snapshot, viewModel, navigate, wide)
         LiveScreen.Search -> SearchScreen(snapshot, viewModel, navigate)
         LiveScreen.Library -> LibraryScreen(snapshot, viewModel, navigate)
-        LiveScreen.Playlist -> PlaylistScreen(snapshot.openedPlaylist, snapshot.playlists, viewModel, navigate, wide)
+        LiveScreen.Playlist -> PlaylistScreen(snapshot, viewModel, navigate, wide)
         LiveScreen.NowPlaying -> Unit
     }
 }
@@ -415,9 +416,6 @@ private fun HomeScreen(
                     FilterChip(selected = filter == label, onClick = { filter = label }, label = { Text(label) })
                 }
             }
-        }
-        if (snapshot.localPlayback != LocalPlaybackState.Connected && snapshot.devices.none { it.active }) {
-            item { PlaybackSetupCard(snapshot, viewModel) }
         }
         snapshot.localError?.let { error -> item { ErrorCard(error) } }
         snapshot.error?.let { error -> item { ErrorCard(error) } }
@@ -543,6 +541,13 @@ private fun SearchScreen(
 ) {
     var query by remember(snapshot.searchQuery) { mutableStateOf(snapshot.searchQuery) }
     val keyboard = LocalSoftwareKeyboardController.current
+    LaunchedEffect(query) {
+        delay(400)
+        val normalized = query.trim()
+        if (normalized != snapshot.searchQuery && (normalized.isEmpty() || normalized.length >= 2)) {
+            viewModel.search(normalized)
+        }
+    }
     LazyColumn(
         Modifier.fillMaxSize(),
         contentPadding = PaddingValues(20.dp),
@@ -562,6 +567,45 @@ private fun SearchScreen(
                     keyboard?.hide()
                 }),
             )
+        }
+        item {
+            Button(
+                onClick = { viewModel.search(query); keyboard?.hide() },
+                enabled = query.trim().isNotEmpty() && !snapshot.busy,
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                Icon(Icons.Default.Search, null)
+                Spacer(Modifier.width(8.dp))
+                Text("Найти")
+            }
+        }
+        if (snapshot.busy) item { LinearProgressIndicator(Modifier.fillMaxWidth()) }
+        snapshot.error?.let { error -> item { ErrorCard(error) } }
+        if (snapshot.searchQuery.isEmpty() && snapshot.searchResults.isEmpty()) {
+            item { Text("Введите название трека, исполнителя, альбома или плейлиста", color = TextSecondary) }
+            if (snapshot.topTracks.isNotEmpty()) {
+                item { SectionTitle("Для вас") }
+                itemsIndexed(
+                    snapshot.topTracks.take(8),
+                    key = { index, track -> "search-suggestion-$index-${track.id}" },
+                ) { _, track ->
+                    TrackRow(track, { viewModel.play(track) }, viewModel, snapshot.playlists)
+                }
+            }
+            if (snapshot.topArtists.isNotEmpty()) {
+                item { SectionTitle("Ваши исполнители") }
+                itemsIndexed(
+                    snapshot.topArtists.take(8),
+                    key = { index, card -> "search-artist-$index-${card.id}" },
+                ) { _, card ->
+                    CompactCard(card, Modifier.fillMaxWidth()) {
+                        viewModel.openContent(card.kind, card.id)
+                        navigate(LiveScreen.Playlist)
+                    }
+                }
+            }
+        } else if (!snapshot.busy && snapshot.error == null && snapshot.searchResults.isEmpty()) {
+            item { Text("Ничего не найдено", color = TextSecondary) }
         }
         itemsIndexed(snapshot.searchResults, key = { index, card -> "search-$index-${card.kind}-${card.id}" }) { _, card ->
             CompactCard(card, Modifier.fillMaxWidth()) {
@@ -664,14 +708,29 @@ private fun LikedSongsArtwork(modifier: Modifier) {
 
 @Composable
 private fun PlaylistScreen(
-    playlist: LivePlaylist?,
-    playlists: List<LiveCard>,
+    snapshot: LiveSnapshot,
     viewModel: LiveUiController,
     navigate: (LiveScreen) -> Unit,
     wide: Boolean,
 ) {
+    val playlist = snapshot.openedPlaylist
     if (playlist == null) {
-        Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { CircularProgressIndicator() }
+        Column(
+            Modifier.fillMaxSize().padding(20.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(16.dp),
+        ) {
+            IconButton(onClick = { navigate(LiveScreen.Home) }, modifier = Modifier.align(Alignment.Start)) {
+                Icon(Icons.AutoMirrored.Filled.ArrowBack, "Назад")
+            }
+            if (snapshot.busy) {
+                CircularProgressIndicator()
+                Text("Загружаем страницу Spotify…", color = TextSecondary)
+            } else {
+                snapshot.error?.let { ErrorCard(it) }
+                Button(onClick = { navigate(LiveScreen.Home) }) { Text("Вернуться") }
+            }
+        }
         return
     }
     LazyColumn(
@@ -700,7 +759,7 @@ private fun PlaylistScreen(
                 track,
                 { viewModel.playInContext(track, playlist.uri) },
                 viewModel,
-                playlists,
+                snapshot.playlists,
                 playlist.id,
             )
         }

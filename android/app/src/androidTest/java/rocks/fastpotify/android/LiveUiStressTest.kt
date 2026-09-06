@@ -8,11 +8,13 @@ import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performTextInput
 import androidx.compose.ui.test.performTouchInput
 import androidx.compose.ui.test.swipeUp
 import org.junit.Rule
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import java.util.concurrent.atomic.AtomicReference
 import rocks.fastpotify.android.model.AuthState
 import rocks.fastpotify.android.model.LiveCard
 import rocks.fastpotify.android.model.LiveNowPlaying
@@ -84,6 +86,60 @@ class LiveUiStressTest {
         assertTrue(compose.onAllNodesWithText("Repeated song").fetchSemanticsNodes().isNotEmpty())
     }
 
+    @Test
+    fun playlistFailureShowsTheSpotifyErrorInsteadOfSpinningForever() {
+        val playlist = LiveCard(
+            id = "unavailable",
+            uri = "spotify:playlist:unavailable",
+            title = "Unavailable playlist",
+            subtitle = "Spotify",
+            imageUrl = null,
+            kind = "playlist",
+        )
+        compose.activity.setContent {
+            FastpotifyTheme {
+                LiveFastpotifyApp(
+                    FakeController(
+                        LiveSnapshot(
+                            authState = AuthState.SignedIn,
+                            playlists = listOf(playlist),
+                            error = "Плейлист не загружен: Spotify ответил 403",
+                        ),
+                    ),
+                    UiProfile.Phone,
+                    {},
+                    {},
+                    requestNotificationPermission = false,
+                )
+            }
+        }
+
+        compose.onNodeWithText("Unavailable playlist").performClick()
+        compose.onNodeWithText("Плейлист не загружен: Spotify ответил 403").assertIsDisplayed()
+        compose.onNodeWithText("Вернуться").assertIsDisplayed()
+    }
+
+    @Test
+    fun searchRunsWhileTypingWithoutDependingOnTheKeyboardSearchKey() {
+        val controller = FakeController(LiveSnapshot(authState = AuthState.SignedIn))
+        compose.activity.setContent {
+            FastpotifyTheme {
+                LiveFastpotifyApp(
+                    controller,
+                    UiProfile.Phone,
+                    {},
+                    {},
+                    requestNotificationPermission = false,
+                )
+            }
+        }
+
+        compose.onNodeWithText("Поиск").performClick()
+        compose.onNodeWithText("Что хотите послушать?").performTextInput("Muse")
+        compose.waitUntil(5_000) { controller.lastSearch.get() == "Muse" }
+        assertTrue(controller.lastSearch.get() == "Muse")
+    }
+
     private fun stressSnapshot(): LiveSnapshot {
         val track = LiveTrack(
             id = "same-id",
@@ -132,10 +188,11 @@ class LiveUiStressTest {
 }
 
 private class FakeController(override val snapshot: LiveSnapshot) : LiveUiController {
+    val lastSearch = AtomicReference<String?>(null)
     override fun signIn() = Unit
     override fun startLocalPlayback() = Unit
     override fun refresh() = Unit
-    override fun search(query: String) = Unit
+    override fun search(query: String) { lastSearch.set(query) }
     override fun openPlaylist(id: String) = Unit
     override fun openContent(kind: String, id: String) = Unit
     override fun command(action: String, value: String) = Unit
