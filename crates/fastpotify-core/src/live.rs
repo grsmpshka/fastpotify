@@ -384,6 +384,9 @@ impl MobileClient {
                 let mut guard = lock(&state);
                 guard.snapshot.local_playback = LocalPlaybackState::SignedOut;
                 guard.snapshot.local_error = Some(format!("Локальное воспроизведение: {error}"));
+                if let Some(now) = guard.snapshot.now_playing.as_mut() {
+                    now.playing = false;
+                }
                 bump(&mut guard.snapshot);
             }
         });
@@ -411,6 +414,9 @@ impl MobileClient {
                 let mut guard = lock(&state);
                 guard.snapshot.local_playback = LocalPlaybackState::SignedOut;
                 guard.snapshot.local_error = Some(format!("Spotify Connect: {error}"));
+                if let Some(now) = guard.snapshot.now_playing.as_mut() {
+                    now.playing = false;
+                }
                 bump(&mut guard.snapshot);
             }
         });
