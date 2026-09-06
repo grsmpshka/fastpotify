@@ -1009,7 +1009,10 @@ private fun OverlayContent(
     when (overlay) {
         Overlay.Queue -> ModalBottomSheet(onDismissRequest = dismiss) {
             Text("Очередь", Modifier.padding(horizontal = 20.dp), fontSize = 24.sp, fontWeight = FontWeight.Bold)
-            LazyColumn(Modifier.fillMaxWidth().height(420.dp), contentPadding = PaddingValues(12.dp)) {
+            LazyColumn(
+                Modifier.fillMaxWidth().height(420.dp).semantics { testTag = "queue-list" },
+                contentPadding = PaddingValues(12.dp),
+            ) {
                 itemsIndexed(snapshot.queue, key = { index, track -> "queue-$index-${track.id}-${track.uri}" }) { _, track ->
                     TrackRow(track, { viewModel.play(track) }, viewModel, snapshot.playlists)
                 }
