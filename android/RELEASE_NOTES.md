@@ -1,18 +1,24 @@
-The first Android preview brings Fastpotify's compact music interface to phones and wide automotive displays. It is an interface preview with deterministic demo data, not yet a Spotify sign-in or playback build.
+Fastpotify for Android is now a live Spotify client rather than an interface preview. It keeps the compact native design, but the library, artwork, controls, queue, devices, and playback now come from Spotify and Fastpotify's existing Rust engine.
 
 ## New
 
-- **One APK for phone and Voyah Free.** Automatic layout selection and a manual profile chooser keep controls readable on a Galaxy S24 Ultra-sized screen and a 1920×720 automotive display.
-- **A familiar adaptive music library.** Quick-access tiles, square artwork, Liked Songs, playlists, track rows, a mini player, and a persistent automotive player follow Fastpotify's desktop proportions.
-- **Updates from inside the app.** Fastpotify checks this fork's Android releases once a day, verifies the downloaded APK checksum and signing certificate, and then opens Android's installer.
-- **Deterministic interface coverage.** CI renders and checks five phone and automotive screenshots on an Android emulator.
+- **Real Spotify library and artwork.** Sign in on Spotify's page and browse playlists, Liked Songs, albums, followed artists, podcasts, episodes, recent listening, and top tracks with their real covers.
+- **Local Premium playback.** Fastpotify's existing librespot player runs on Android at up to 320 kbps and appears as a Spotify Connect device.
+- **Background media controls.** Playback continues through a foreground service with notification, lock-screen, headset, and system media controls.
+- **Full search and content pages.** Search songs, albums, artists, playlists, podcasts, and episodes, then open or play the result.
+- **Queue, devices, and playlists.** Control other Connect devices, seek, change volume, shuffle and repeat, edit the queue, create playlists, and add or remove playlist tracks.
+- **Playback settings.** Choose quality, normalisation, gapless playback, autoplay, and an audio-cache limit from inside the app.
+- **Spotify link handling.** Open `spotify:` and `open.spotify.com` links directly in Fastpotify.
+- **One adaptive APK.** The signed package covers Galaxy S24 Ultra-sized phones, arm64 devices, x86_64 systems, and the wide Voyah Free interface.
+- **Safe in-app updates.** Updates are accepted only when their checksum and permanent signing certificate match this app.
 
 ## Fixed
 
-- **Artwork stays proportional.** Covers use centered square crops and size-aware fallbacks instead of stretching or disappearing.
+- **Artwork keeps familiar proportions.** Covers remain square, center-cropped, and consistently spaced; Liked Songs has its dedicated gradient heart cover.
+- **Playback state stays current.** Optimistic controls respond immediately while Spotify and librespot catch up in the background.
 
 ## Thanks
 
-Thanks to the Fastpotify contributors whose desktop interface and shared Rust core make this Android preview possible.
+Thanks to the Fastpotify and librespot contributors whose existing desktop engine, Web API client, and Spotify Connect implementation are reused by this Android release.
 
-Full changelog: `3a3d793...v0.6.0-android.1`
+Full changelog: `v0.6.0-android.1...v0.6.0-android.2`

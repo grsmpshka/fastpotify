@@ -15,25 +15,39 @@ cannot play music through Fastpotify on this computer or another device.
 See [fastpotify.rocks](https://fastpotify.rocks/) for installation, setup,
 everyday use, and connection details.
 
-## Android client (preview)
+## Android client
 
-The `android-client` branch contains one Android application with adaptive
-Voyah Free and phone interfaces. Milestone 1 is a deterministic UI preview:
-it does not sign in or start playback. Network access is currently used only
-to check and download updates from this GitHub fork.
+The `android-client` branch contains one native Android application for
+phones and wide automotive displays, including Voyah Free. It signs in on
+Spotify's own page, loads the real library and artwork, searches every content
+type, controls Spotify Connect devices, and plays locally through Fastpotify's
+existing librespot engine. Local playback requires Spotify Premium and one
+additional Spotify approval.
 
-**[Download Fastpotify for Android](https://github.com/grsmpshka/fastpotify/releases/download/v0.6.0-android.1/fastpotify-android.apk)**
+**[Download Fastpotify for Android](https://github.com/grsmpshka/fastpotify/releases/download/v0.6.0-android.2/fastpotify-android.apk)**
 
-The same APK supports arm64 phones and automotive displays. Android may ask
-you to allow installs from Fastpotify before the first in-app update. The app
-checks for a newer Android preview at most once a day; open the profile menu
-and choose **Check for updates** to check manually. Every downloaded APK is
-accepted only after its GitHub SHA-256 digest and signing certificate match.
+The same signed APK includes arm64 and x86_64 builds. Its interface switches
+automatically between the Galaxy S24 Ultra-sized phone layout and the
+three-panel automotive layout; either profile can also be selected manually.
+Spotify artwork stays square and center-cropped, while Liked Songs uses a
+dedicated gradient cover.
 
-The Android project lives in `android/`; its JNI library is built from
-`crates/fastpotify-android`, with shared contracts and demo data in
-`crates/fastpotify-core`. From the repository root, install the Rust Android
-targets and `cargo-ndk`, then build the debug APK with:
+Playback continues through an Android foreground media service with lock
+screen and notification controls. The application also opens `spotify:` and
+`open.spotify.com` links, creates and edits playlist contents, exposes queue
+and device pickers, and stores quality, normalisation, gapless playback,
+autoplay, and cache settings locally. It has no telemetry or browser engine.
+
+The app checks this fork's releases at most once a day; choose **Check for
+updates** in the profile menu to check immediately. A downloaded update is
+installed only after both its GitHub SHA-256 digest and permanent signing
+certificate match. Android still requires the user to approve installation
+from outside Google Play the first time.
+
+The Android project lives in `android/`; its small JNI layer calls the shared
+Web API, authentication, queue, audio, and librespot modules from the desktop
+client instead of reimplementing them. Build instructions and platform notes
+are in [`android/README.md`](android/README.md). A local debug build starts with:
 
 ```sh
 rustup target add aarch64-linux-android x86_64-linux-android
@@ -42,10 +56,8 @@ cd android
 ./gradlew :app:assembleDebug
 ```
 
-Debug builds accept deterministic demo routes used by CI screenshot tests.
-Release builds do not enable that entry path. Playback, production OAuth,
-MediaSession, foreground service, and Spotify Connect are intentionally
-scheduled for later milestones.
+Debug builds accept deterministic demo routes used only by CI screenshot
+tests. Release builds contain only the live client.
 
 ## What it does
 

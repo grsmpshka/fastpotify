@@ -48,7 +48,7 @@ adds a separate Development Mode quota. See
   api.github.com once a day for updates. You can turn off automatic checks in
   Settings, or request one there at any time. On macOS, **Check for Updates**
   is also in the application menu.
-- The Android preview checks the fork's GitHub releases at most once a day.
+- The Android client checks the fork's GitHub releases at most once a day.
   When you accept an update, it downloads the APK from that release, verifies
   GitHub's SHA-256 digest and the app signing certificate, then hands the file
   to Android's system installer. Android may ask you to allow installs from
