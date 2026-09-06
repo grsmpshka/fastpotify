@@ -29,6 +29,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.safeDrawing
+import androidx.lifecycle.viewmodel.compose.viewModel
 import rocks.fastpotify.android.model.DemoSnapshot
 import rocks.fastpotify.android.ui.components.AppScreen
 import rocks.fastpotify.android.ui.profile.ResolvedProfile
@@ -36,6 +37,7 @@ import rocks.fastpotify.android.ui.profile.UiProfile
 import rocks.fastpotify.android.ui.profile.resolveProfile
 import rocks.fastpotify.android.ui.screens.car.VoyahShell
 import rocks.fastpotify.android.ui.screens.phone.PhoneShell
+import rocks.fastpotify.android.ui.live.LiveFastpotifyApp
 import rocks.fastpotify.android.ui.theme.Background
 import rocks.fastpotify.android.ui.theme.FastpotifyTheme
 import rocks.fastpotify.android.ui.theme.TextPrimary
@@ -45,7 +47,7 @@ import rocks.fastpotify.android.update.UpdatePrompt
 import kotlinx.coroutines.launch
 
 @Composable
-fun FastpotifyApp(initialProfile: String?, initialScreen: String?) {
+fun FastpotifyApp(initialProfile: String?, initialScreen: String?, initialUri: String? = null) {
     val context = LocalContext.current
     val activity = context as? Activity
     val updateScope = rememberCoroutineScope()
@@ -102,7 +104,16 @@ fun FastpotifyApp(initialProfile: String?, initialScreen: String?) {
                     .windowInsetsPadding(WindowInsets.safeDrawing),
             ) {
                 val snapshot = snapshotResult.getOrNull()
-                if (snapshot != null) {
+                if (!isScreenshotCapture) {
+                    val liveViewModel: LiveViewModel = viewModel()
+                    LaunchedEffect(initialUri) { initialUri?.let(liveViewModel::openExternalUri) }
+                    LiveFastpotifyApp(
+                        viewModel = liveViewModel,
+                        profile = profile,
+                        onProfileSelected = { profile = it },
+                        onCheckForUpdates = checkForUpdates,
+                    )
+                } else if (snapshot != null) {
                     BoxWithConstraints(Modifier.fillMaxSize()) {
                         when (resolveProfile(profile, maxWidth, maxHeight)) {
                             ResolvedProfile.VoyahFree -> VoyahShell(

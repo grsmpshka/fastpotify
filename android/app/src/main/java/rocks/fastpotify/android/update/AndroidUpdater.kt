@@ -92,9 +92,7 @@ class AndroidUpdater(private val context: Context) {
     }
 
     fun install(activity: Activity, ready: UpdateUiState.Ready) {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O &&
-            !context.packageManager.canRequestPackageInstalls()
-        ) {
+        if (!context.packageManager.canRequestPackageInstalls()) {
             activity.startActivity(
                 Intent(
                     Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES,
@@ -181,7 +179,12 @@ class AndroidUpdater(private val context: Context) {
     }
 
     private fun hasSameSigner(apk: File): Boolean {
-        val flags = PackageManager.GET_SIGNING_CERTIFICATES
+        @Suppress("DEPRECATION")
+        val flags = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+            PackageManager.GET_SIGNING_CERTIFICATES
+        } else {
+            PackageManager.GET_SIGNATURES
+        }
         val installed = context.packageManager.getPackageInfo(context.packageName, flags)
         val archive = context.packageManager.getPackageArchiveInfo(apk.absolutePath, flags) ?: return false
         return archive.packageName == context.packageName && signerDigests(installed) == signerDigests(archive)

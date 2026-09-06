@@ -1,6 +1,6 @@
 [package]
 name = "fastpotify-core"
-version = "0.6.0-android.1"
+version = "0.6.0-android.2"
 edition = "2024"
 rust-version = "1.95"
 license = "MIT"
@@ -8,5 +8,28 @@ description = "Platform-neutral application contracts for Fastpotify"
 publish = false
 
 [dependencies]
+anyhow = "1"
+base64 = "0.22"
+cpal = "0.16"
+log = "0.4"
+librespot-connect = { version = "0.8", default-features = false }
+librespot-core = { version = "0.8", default-features = false, features = ["rustls-tls-native-roots"] }
+librespot-metadata = { version = "0.8", default-features = false }
+librespot-playback = { version = "0.8", default-features = false, features = ["rodio-backend", "rustls-tls-native-roots"] }
+librespot-protocol = { version = "0.8", default-features = false }
+protobuf = "3"
+rand = "0.9"
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls-webpki-roots", "json", "gzip", "http2"] }
+rodio = { version = "0.21", default-features = false, features = ["playback"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+sha1 = "0.10"
+sha2 = "0.10"
+thiserror = "2"
+tokio = { version = "1", features = ["rt-multi-thread", "sync", "time", "macros", "fs", "net", "io-util"] }
+urlencoding = "2"
+
+[features]
+default = []
+# Kept only so the shared visualiser source can retain its desktop cfg gate.
+milkdrop = []

@@ -18,7 +18,7 @@ class ScreenshotTest {
     private val device = UiDevice.getInstance(instrumentation)
 
     @Test
-    fun captureMilestoneOneScreens() {
+    fun captureAdaptiveScreens() {
         device.executeShellCommand("settings put global window_animation_scale 0")
         device.executeShellCommand("settings put global transition_animation_scale 0")
         device.executeShellCommand("settings put global animator_duration_scale 0")

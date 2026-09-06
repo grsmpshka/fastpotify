@@ -418,6 +418,14 @@ impl Engine {
         &self.device_id
     }
 
+    /// A point-in-time state copy for native frontends and media sessions.
+    pub fn state_snapshot(&self) -> LocalState {
+        self.state
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .clone()
+    }
+
     /// Spotify's own transcription of a track, as the raw JSON its clients
     /// read; `Ok(None)` when Spotify has none, an error when asking failed.
     pub async fn lyrics_json(&self, track_uri: &str) -> Result<Option<serde_json::Value>> {

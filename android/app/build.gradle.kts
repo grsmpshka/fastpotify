@@ -14,8 +14,8 @@ android {
         applicationId = "rocks.fastpotify.android"
         minSdk = 26
         targetSdk = 35
-        versionCode = 600001
-        versionName = "0.6.0-android.1"
+        versionCode = 600002
+        versionName = "0.6.0-android.2"
 
         ndk {
             abiFilters += setOf("arm64-v8a", "x86_64")
@@ -79,9 +79,26 @@ fun registerRustBuild(name: String, release: Boolean) = tasks.register<Exec>(nam
     group = "build"
     description = "Builds the Fastpotify Rust core for Android ABIs."
     workingDir(repositoryRoot)
+    inputs.files(
+        repositoryRoot.resolve("Cargo.toml"),
+        repositoryRoot.resolve("Cargo.lock"),
+        fileTree(repositoryRoot.resolve("crates/fastpotify-core/src")) { include("**/*.rs") },
+        fileTree(repositoryRoot.resolve("crates/fastpotify-android/src")) { include("**/*.rs") },
+        fileTree(repositoryRoot.resolve("src/api")) { include("**/*.rs") },
+        repositoryRoot.resolve("src/auth.rs"),
+        repositoryRoot.resolve("src/player.rs"),
+        repositoryRoot.resolve("src/sink.rs"),
+        repositoryRoot.resolve("src/eq.rs"),
+        repositoryRoot.resolve("src/limiter.rs"),
+        repositoryRoot.resolve("src/resample.rs"),
+        repositoryRoot.resolve("src/vis.rs"),
+        repositoryRoot.resolve("crates/fastpotify-core/Cargo.toml"),
+        repositoryRoot.resolve("crates/fastpotify-android/Cargo.toml"),
+    )
     outputs.dir(rustOutput)
     val args = mutableListOf(
         "ndk",
+        "-p", "26",
         "-t", "arm64-v8a",
         "-t", "x86_64",
         "-o", rustOutput.get().asFile.absolutePath,
@@ -117,6 +134,8 @@ dependencies {
     implementation("androidx.lifecycle:lifecycle-runtime-compose:2.8.7")
     implementation("androidx.lifecycle:lifecycle-viewmodel-compose:2.8.7")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.9.0")
+    // Spotify artwork loading and memory/disk caching for the native Compose UI.
+    implementation("io.coil-kt:coil-compose:2.7.0")
 
     debugImplementation("androidx.compose.ui:ui-tooling")
     debugImplementation("androidx.compose.ui:ui-test-manifest")

@@ -1,5 +1,6 @@
 package rocks.fastpotify.android
 
+import android.content.Intent
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -35,8 +36,15 @@ class MainActivity : ComponentActivity() {
             FastpotifyApp(
                 initialProfile = requestedProfile,
                 initialScreen = requestedScreen,
+                initialUri = intent.dataString,
             )
         }
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        recreate()
     }
 
     companion object {
