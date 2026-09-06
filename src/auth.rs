@@ -12,7 +12,7 @@
 //! one-time authorization code that Spotify sends back to a loopback
 //! listener.
 
-use std::net::SocketAddr;
+use std::net::{SocketAddr, TcpListener as StdTcpListener};
 use std::path::Path;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
@@ -164,12 +164,34 @@ pub struct TokenResponse {
 pub async fn wait_for_code(
     port: u16,
     expected_state: &str,
+    cancel: watch::Receiver<bool>,
+) -> Result<String> {
+    let listener = bind_redirect_listener(port)?;
+    wait_for_code_on(listener, expected_state, cancel).await
+}
+
+/// Binds the loopback redirect before the browser is opened.
+///
+/// Mobile browsers can reuse an existing Spotify session and redirect almost
+/// immediately. Holding this socket before returning the authorization URL
+/// prevents that redirect from racing the async task that consumes it.
+pub fn bind_redirect_listener(port: u16) -> Result<StdTcpListener> {
+    let address: SocketAddr = ([127, 0, 0, 1], port).into();
+    let listener = StdTcpListener::bind(address)
+        .with_context(|| format!("unable to listen on {address} for the Spotify redirect"))?;
+    listener
+        .set_nonblocking(true)
+        .context("unable to configure the Spotify redirect listener")?;
+    Ok(listener)
+}
+
+pub async fn wait_for_code_on(
+    listener: StdTcpListener,
+    expected_state: &str,
     mut cancel: watch::Receiver<bool>,
 ) -> Result<String> {
-    let address: SocketAddr = ([127, 0, 0, 1], port).into();
-    let listener = TcpListener::bind(address)
-        .await
-        .with_context(|| format!("unable to listen on {address} for the Spotify redirect"))?;
+    let listener =
+        TcpListener::from_std(listener).context("unable to start the Spotify redirect listener")?;
     let deadline = tokio::time::sleep(LOGIN_TIMEOUT);
     tokio::pin!(deadline);
 
@@ -508,6 +530,24 @@ mod tests {
         assert!(parse_request_line("GET /favicon.ico HTTP/1.1", "s1").is_err());
         assert!(
             parse_request_line("GET /login?error=access_denied&state=s1 HTTP/1.1", "s1").is_err()
+        );
+    }
+
+    #[tokio::test]
+    async fn prebound_listener_keeps_an_immediate_redirect() {
+        use std::io::Write;
+
+        let listener = bind_redirect_listener(0).unwrap();
+        let address = listener.local_addr().unwrap();
+        let mut browser = std::net::TcpStream::connect(address).unwrap();
+        browser
+            .write_all(b"GET /login?code=ready&state=s1 HTTP/1.1\r\n\r\n")
+            .unwrap();
+        let (_cancel_tx, cancel_rx) = watch::channel(false);
+
+        assert_eq!(
+            wait_for_code_on(listener, "s1", cancel_rx).await.unwrap(),
+            "ready"
         );
     }
 

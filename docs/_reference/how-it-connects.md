@@ -22,6 +22,9 @@ local playback:
    is required.
 
 Local playback authorization stays separate from both Web API grants.
+On Android, Fastpotify binds the loopback callback socket before opening the
+browser. This keeps an already signed-in Spotify session from redirecting to
+`127.0.0.1` before the app is ready to receive its one-time code.
 
 By default, Fastpotify uses the public app shared with spotify-player, ncspot,
 and Omarchy Spotify. Spotify divides its quota among all users. A personal app

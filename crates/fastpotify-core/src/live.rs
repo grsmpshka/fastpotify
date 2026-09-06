@@ -270,6 +270,7 @@ impl MobileClient {
     pub fn start_sign_in(&self) -> Result<String> {
         let grant = Grant::shared_web_api();
         let flow = auth::begin(grant.clone());
+        let listener = auth::bind_redirect_listener(grant.redirect_port)?;
         {
             let mut state = lock(&self.state);
             state.snapshot.auth_status = AuthState::SigningIn;
@@ -286,7 +287,7 @@ impl MobileClient {
         self.runtime.spawn(async move {
             let result = async {
                 let (_cancel_tx, cancel_rx) = tokio::sync::watch::channel(false);
-                let code = auth::wait_for_code(grant.redirect_port, &flow.state, cancel_rx).await?;
+                let code = auth::wait_for_code_on(listener, &flow.state, cancel_rx).await?;
                 let response = auth::exchange_code(&http, &grant, &code, &flow.verifier).await?;
                 let token = StoredToken::from_response(&grant.client_id, response, None)?;
                 token.save(&token_path)?;
@@ -359,6 +360,7 @@ impl MobileClient {
     pub fn start_local_sign_in(&self) -> Result<String> {
         let grant = Grant::playback();
         let flow = auth::begin(grant.clone());
+        let listener = auth::bind_redirect_listener(grant.redirect_port)?;
         {
             let mut state = lock(&self.state);
             state.snapshot.local_playback = LocalPlaybackState::SigningIn;
@@ -372,7 +374,7 @@ impl MobileClient {
         self.runtime.spawn(async move {
             let result = async {
                 let (_cancel_tx, cancel_rx) = tokio::sync::watch::channel(false);
-                let code = auth::wait_for_code(grant.redirect_port, &flow.state, cancel_rx).await?;
+                let code = auth::wait_for_code_on(listener, &flow.state, cancel_rx).await?;
                 let token = auth::exchange_code(&http, &grant, &code, &flow.verifier).await?;
                 let cache = config.open_cache()?;
                 let credentials = Credentials::with_access_token(token.access_token);
