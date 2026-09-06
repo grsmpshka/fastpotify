@@ -74,6 +74,12 @@ pub extern "system" fn Java_rocks_fastpotify_android_NativeBridge_initialize(
     context: JObject<'_>,
 ) {
     let result = catch_unwind(AssertUnwindSafe(|| {
+        #[cfg(target_os = "android")]
+        android_logger::init_once(
+            android_logger::Config::default()
+                .with_max_level(log::LevelFilter::Info)
+                .with_tag("Fastpotify"),
+        );
         if ANDROID_CONTEXT.get().is_none() {
             let global = env
                 .new_global_ref(&context)

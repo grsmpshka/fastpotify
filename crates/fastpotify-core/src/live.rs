@@ -6,6 +6,7 @@
 
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
+use std::time::Duration;
 
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
@@ -23,7 +24,12 @@ use librespot_core::{authentication::Credentials, cache::Cache};
 
 const TOKEN_FILE: &str = "spotify-web-token.json";
 const SETTINGS_FILE: &str = "android-settings.json";
+const SNAPSHOT_CACHE_FILE: &str = "spotify-content-cache.json";
 const IMAGE_TARGET: u32 = 360;
+const HTTP_CONNECT_TIMEOUT: Duration = Duration::from_secs(8);
+const HTTP_REQUEST_TIMEOUT: Duration = Duration::from_secs(20);
+const PLAYBACK_CONNECT_TIMEOUT: Duration = Duration::from_secs(45);
+const PLAYBACK_REGISTRATION_DELAY: Duration = Duration::from_millis(1_500);
 
 #[derive(Clone, Debug, Default, Deserialize, Serialize, PartialEq)]
 pub struct LiveSnapshot {
@@ -158,6 +164,13 @@ struct State {
     snapshot: LiveSnapshot,
     api: Option<Arc<ApiClient>>,
     engine: Option<Arc<Engine>>,
+    /// A tap made before this phone was a ready Spotify Connect device.
+    ///
+    /// This lives in the native process rather than an Android ViewModel.
+    /// Android may recreate the Activity while the browser handles the
+    /// separate playback grant, but the requested song must still start when
+    /// librespot finishes connecting.
+    pending_load: Option<LoadSpec>,
 }
 
 /// Owns the async runtime and the headless Spotify state.
@@ -166,6 +179,7 @@ pub struct MobileClient {
     http: reqwest::Client,
     state: Arc<Mutex<State>>,
     token_path: PathBuf,
+    snapshot_cache_path: PathBuf,
     files_dir: PathBuf,
 }
 
@@ -178,34 +192,53 @@ impl MobileClient {
             .context("unable to start the Fastpotify runtime")?;
         let http = reqwest::Client::builder()
             .user_agent(concat!("Fastpotify-Android/", env!("CARGO_PKG_VERSION")))
+            .connect_timeout(HTTP_CONNECT_TIMEOUT)
+            .timeout(HTTP_REQUEST_TIMEOUT)
             .build()
             .context("unable to create the Spotify HTTP client")?;
         let files_dir = files_dir.as_ref().to_path_buf();
         std::fs::create_dir_all(&files_dir).context("unable to create the app data directory")?;
         let token_path = files_dir.join(TOKEN_FILE);
+        let snapshot_cache_path = files_dir.join(SNAPSHOT_CACHE_FILE);
         let settings = load_settings(&files_dir);
         let token =
             StoredToken::load(&token_path).filter(|token| token.has_scopes(auth::WEB_SCOPES));
+        let signed_in = token.is_some();
         let api = token.map(|token| api_client(&http, token, &token_path));
-        let auth_status = if api.is_some() {
+        let auth_status = if signed_in {
             AuthState::SignedIn
         } else {
             AuthState::SignedOut
         };
+        let mut snapshot = if signed_in {
+            load_cached_snapshot(&snapshot_cache_path).unwrap_or_default()
+        } else {
+            LiveSnapshot::default()
+        };
+        snapshot.contract_version = crate::CONTRACT_VERSION;
+        snapshot.auth_status = auth_status;
+        snapshot.busy = false;
+        snapshot.error = None;
+        snapshot.opened_playlist = None;
+        snapshot.now_playing = None;
+        snapshot.queue.clear();
+        snapshot.devices.clear();
+        snapshot.local_playback = LocalPlaybackState::SignedOut;
+        snapshot.local_error = None;
+        snapshot.search_query.clear();
+        snapshot.search_results.clear();
+        snapshot.settings = settings;
         let client = Self {
             runtime,
             http,
             state: Arc::new(Mutex::new(State {
-                snapshot: LiveSnapshot {
-                    contract_version: crate::CONTRACT_VERSION,
-                    auth_status,
-                    settings,
-                    ..LiveSnapshot::default()
-                },
+                snapshot,
                 api,
                 engine: None,
+                pending_load: None,
             })),
             token_path,
+            snapshot_cache_path,
             files_dir,
         };
         if auth_status == AuthState::SignedIn {
@@ -249,6 +282,7 @@ impl MobileClient {
         let state = Arc::clone(&self.state);
         let http = self.http.clone();
         let token_path = self.token_path.clone();
+        let snapshot_cache_path = self.snapshot_cache_path.clone();
         self.runtime.spawn(async move {
             let result = async {
                 let (_cancel_tx, cancel_rx) = tokio::sync::watch::channel(false);
@@ -257,20 +291,32 @@ impl MobileClient {
                 let token = StoredToken::from_response(&grant.client_id, response, None)?;
                 token.save(&token_path)?;
                 let api = api_client(&http, token, &token_path);
-                let dashboard = fetch_dashboard(&api).await.map_err(anyhow::Error::msg)?;
-                Ok::<_, anyhow::Error>((api, dashboard))
+                Ok::<_, anyhow::Error>(api)
             }
             .await;
 
             match result {
-                Ok((api, dashboard)) => {
+                Ok(api) => {
                     {
                         let mut guard = lock(&state);
                         guard.api = Some(Arc::clone(&api));
                         guard.snapshot.auth_status = AuthState::SignedIn;
-                        apply_dashboard(&mut guard.snapshot, dashboard);
+                        guard.snapshot.busy = true;
+                        guard.snapshot.error = None;
+                        bump(&mut guard.snapshot);
                     }
-                    refresh_enrichment(&api, &state).await;
+                    match fetch_dashboard(&api).await {
+                        Ok(dashboard) => {
+                            let mut guard = lock(&state);
+                            apply_dashboard(&mut guard.snapshot, dashboard);
+                        }
+                        Err(error) => {
+                            finish_error(&state, format!("Данные Spotify не загружены: {error}"));
+                            return;
+                        }
+                    }
+                    persist_snapshot(&state, &snapshot_cache_path);
+                    refresh_enrichment(&api, &state, &snapshot_cache_path).await;
                 }
                 Err(error) => {
                     let mut guard = lock(&state);
@@ -286,10 +332,12 @@ impl MobileClient {
 
     pub fn sign_out(&self) {
         StoredToken::remove(&self.token_path);
+        let _ = std::fs::remove_file(&self.snapshot_cache_path);
         let engine = {
             let mut state = lock(&self.state);
             state.api = None;
             let engine = state.engine.take();
+            state.pending_load = None;
             let settings = state.snapshot.settings.clone();
             state.snapshot = LiveSnapshot {
                 contract_version: crate::CONTRACT_VERSION,
@@ -332,6 +380,7 @@ impl MobileClient {
             }
             .await;
             if let Err(error) = result {
+                log::warn!("Android local playback setup failed: {error:#}");
                 let mut guard = lock(&state);
                 guard.snapshot.local_playback = LocalPlaybackState::SignedOut;
                 guard.snapshot.local_error = Some(format!("Локальное воспроизведение: {error}"));
@@ -358,6 +407,7 @@ impl MobileClient {
         self.runtime.spawn(async move {
             if let Err(error) = connect_engine(config, credentials, cache, Arc::clone(&state)).await
             {
+                log::warn!("Android Spotify Connect restore failed: {error:#}");
                 let mut guard = lock(&state);
                 guard.snapshot.local_playback = LocalPlaybackState::SignedOut;
                 guard.snapshot.local_error = Some(format!("Spotify Connect: {error}"));
@@ -372,6 +422,7 @@ impl MobileClient {
         };
         self.set_busy();
         let state = Arc::clone(&self.state);
+        let snapshot_cache_path = self.snapshot_cache_path.clone();
         self.runtime.spawn(async move {
             match fetch_dashboard(&api).await {
                 Ok(data) => {
@@ -380,7 +431,8 @@ impl MobileClient {
                         guard.snapshot.auth_status = AuthState::SignedIn;
                         apply_dashboard(&mut guard.snapshot, data);
                     }
-                    refresh_enrichment(&api, &state).await;
+                    persist_snapshot(&state, &snapshot_cache_path);
+                    refresh_enrichment(&api, &state, &snapshot_cache_path).await;
                 }
                 Err(error) => finish_error(&state, error),
             }
@@ -632,6 +684,9 @@ impl MobileClient {
             bump(&mut state.snapshot);
             return;
         }
+        if self.defer_local_load(&action, &value) {
+            return;
+        }
         let Some(api) = self.api() else {
             return;
         };
@@ -829,6 +884,22 @@ impl MobileClient {
             .flatten()
     }
 
+    /// Keeps a play request until the local engine exists when Spotify has no
+    /// other active target. Without this, Android lost the tap during the
+    /// browser round trip used to authorize librespot.
+    fn defer_local_load(&self, action: &str, value: &str) -> bool {
+        let mut state = lock(&self.state);
+        let has_active_device = state.snapshot.devices.iter().any(|device| device.active);
+        let Some(load) = deferred_load(action, value, has_active_device) else {
+            return false;
+        };
+        state.pending_load = Some(load);
+        state.snapshot.busy = false;
+        state.snapshot.error = None;
+        bump(&mut state.snapshot);
+        true
+    }
+
     fn set_busy(&self) {
         let mut state = lock(&self.state);
         state.snapshot.busy = true;
@@ -986,7 +1057,11 @@ fn apply_dashboard(snapshot: &mut LiveSnapshot, data: DashboardData) {
     bump(snapshot);
 }
 
-async fn refresh_enrichment(api: &Arc<ApiClient>, state: &Arc<Mutex<State>>) {
+async fn refresh_enrichment(
+    api: &Arc<ApiClient>,
+    state: &Arc<Mutex<State>>,
+    snapshot_cache_path: &Path,
+) {
     // Let the first library snapshot reach the UI before lower-priority
     // shelves start consuming the shared Spotify request budget.
     tokio::time::sleep(std::time::Duration::from_secs(1)).await;
@@ -1000,6 +1075,7 @@ async fn refresh_enrichment(api: &Arc<ApiClient>, state: &Arc<Mutex<State>>) {
         bump(&mut guard.snapshot);
     }
     refresh_discovery(api, state).await;
+    persist_snapshot(state, snapshot_cache_path);
 }
 
 /// Personal shelves are deliberately loaded after the library. The shared
@@ -1131,6 +1207,44 @@ fn save_settings(files_dir: &Path, settings: &MobileSettings) -> Result<()> {
     Ok(())
 }
 
+fn load_cached_snapshot(path: &Path) -> Option<LiveSnapshot> {
+    std::fs::read(path)
+        .ok()
+        .and_then(|bytes| serde_json::from_slice(&bytes).ok())
+}
+
+fn persist_snapshot(state: &Arc<Mutex<State>>, path: &Path) {
+    let snapshot = snapshot_for_cache(&lock(state).snapshot);
+    if let Err(error) = save_cached_snapshot(path, &snapshot) {
+        log::warn!("unable to cache Android Spotify content: {error}");
+    }
+}
+
+fn snapshot_for_cache(current: &LiveSnapshot) -> LiveSnapshot {
+    let mut snapshot = current.clone();
+    // Only catalogue and library data are useful after a process restart.
+    // Playback, errors and in-flight operations describe the old process.
+    snapshot.busy = false;
+    snapshot.error = None;
+    snapshot.opened_playlist = None;
+    snapshot.now_playing = None;
+    snapshot.queue.clear();
+    snapshot.devices.clear();
+    snapshot.local_playback = LocalPlaybackState::SignedOut;
+    snapshot.local_error = None;
+    snapshot.search_query.clear();
+    snapshot.search_results.clear();
+    snapshot
+}
+
+fn save_cached_snapshot(path: &Path, snapshot: &LiveSnapshot) -> Result<()> {
+    let temporary = path.with_extension("json.tmp");
+    let bytes = serde_json::to_vec(snapshot)?;
+    std::fs::write(&temporary, bytes).context("unable to write the Spotify content cache")?;
+    std::fs::rename(&temporary, path).context("unable to replace the Spotify content cache")?;
+    Ok(())
+}
+
 async fn connect_engine(
     config: EngineConfig,
     credentials: Credentials,
@@ -1155,12 +1269,36 @@ async fn connect_engine(
         }
         bump(&mut guard.snapshot);
     });
-    let engine = Arc::new(Engine::connect(&config, credentials, cache, notify).await?);
-    let mut guard = lock(&state);
-    guard.engine = Some(engine);
-    guard.snapshot.local_playback = LocalPlaybackState::Connected;
-    guard.snapshot.local_error = None;
-    bump(&mut guard.snapshot);
+    let engine = tokio::time::timeout(
+        PLAYBACK_CONNECT_TIMEOUT,
+        Engine::connect(&config, credentials, cache, notify),
+    )
+    .await
+    .map_err(|_| {
+        anyhow::anyhow!(
+            "сервер Spotify не ответил за {} секунд; проверьте доступ к Spotify в этой сети",
+            PLAYBACK_CONNECT_TIMEOUT.as_secs()
+        )
+    })??;
+    let engine = Arc::new(engine);
+    let pending = {
+        let mut guard = lock(&state);
+        guard.engine = Some(Arc::clone(&engine));
+        guard.snapshot.local_playback = LocalPlaybackState::Connected;
+        guard.snapshot.local_error = None;
+        bump(&mut guard.snapshot);
+        guard.pending_load.take()
+    };
+    if let Some(load) = pending {
+        // Spirc needs a short registration window. The desktop backend uses
+        // the same delay before resuming a pending load.
+        tokio::time::sleep(PLAYBACK_REGISTRATION_DELAY).await;
+        if let Err(error) = engine.command(PlayerCommand::Load(load)) {
+            let mut guard = lock(&state);
+            guard.snapshot.local_error = Some(format!("Трек не запущен: {error}"));
+            bump(&mut guard.snapshot);
+        }
+    }
     Ok(())
 }
 
@@ -1382,6 +1520,19 @@ fn load_spec_for_context(context_uri: &str, offset_uri: &str) -> LoadSpec {
     }
 }
 
+fn deferred_load(action: &str, value: &str, has_active_device: bool) -> Option<LoadSpec> {
+    if has_active_device {
+        return None;
+    }
+    match action {
+        "play_uri" => Some(load_spec_for_uri(value)),
+        "play_context" => value
+            .split_once('\n')
+            .map(|(context, offset)| load_spec_for_context(context, offset)),
+        _ => None,
+    }
+}
+
 fn made_for_you<const N: usize>(searches: [(&str, Option<SearchResults>); N]) -> Vec<LiveCard> {
     let mut cards = Vec::new();
     let mut seen = std::collections::HashSet::new();
@@ -1461,9 +1612,11 @@ fn image_url(images: &[Image]) -> Option<String> {
 }
 
 fn finish_error(state: &Arc<Mutex<State>>, error: impl Into<String>) {
+    let error = error.into();
+    log::warn!("Android Spotify operation failed: {error}");
     let mut state = lock(state);
     state.snapshot.busy = false;
-    state.snapshot.error = Some(error.into());
+    state.snapshot.error = Some(error);
     bump(&mut state.snapshot);
 }
 
@@ -1538,6 +1691,36 @@ mod tests {
     }
 
     #[test]
+    fn cached_mobile_content_survives_restart_without_stale_activity() {
+        let directory =
+            std::env::temp_dir().join(format!("fastpotify-mobile-content-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&directory);
+        std::fs::create_dir_all(&directory).unwrap();
+        let path = directory.join(SNAPSHOT_CACHE_FILE);
+        let snapshot = LiveSnapshot {
+            busy: true,
+            error: Some("old error".into()),
+            playlists: vec![LiveCard {
+                id: "list".into(),
+                uri: "spotify:playlist:list".into(),
+                title: "Kept playlist".into(),
+                subtitle: "Spotify".into(),
+                image_url: None,
+                kind: "playlist".into(),
+            }],
+            search_query: "old search".into(),
+            ..LiveSnapshot::default()
+        };
+        save_cached_snapshot(&path, &snapshot_for_cache(&snapshot)).unwrap();
+        let restored = load_cached_snapshot(&path).unwrap();
+        assert_eq!(restored.playlists[0].title, "Kept playlist");
+        assert!(!restored.busy);
+        assert_eq!(restored.error, None);
+        assert!(restored.search_query.is_empty());
+        std::fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
     fn album_tracks_inherit_collection_artwork() {
         let album = crate::api::models::Album {
             name: "Album".into(),
@@ -1575,6 +1758,24 @@ mod tests {
             Some("spotify:playlist:playlist")
         );
         assert_eq!(playlist.offset_uri.as_deref(), Some("spotify:track:abc"));
+    }
+
+    #[test]
+    fn a_play_tap_waits_for_local_authorization_without_an_active_device() {
+        let deferred = deferred_load(
+            "play_context",
+            "spotify:playlist:list\nspotify:track:song",
+            false,
+        )
+        .unwrap();
+        assert_eq!(
+            deferred.context_uri.as_deref(),
+            Some("spotify:playlist:list")
+        );
+        assert_eq!(deferred.offset_uri.as_deref(), Some("spotify:track:song"));
+        assert!(deferred.play);
+        assert!(deferred_load("play_uri", "spotify:track:song", true).is_none());
+        assert!(deferred_load("pause", "", false).is_none());
     }
 
     #[test]

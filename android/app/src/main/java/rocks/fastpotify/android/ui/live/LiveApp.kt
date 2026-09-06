@@ -404,6 +404,7 @@ private fun HomeScreen(
         "Музыка" -> snapshot.playlists
         else -> snapshot.playlists + snapshot.libraryItems.filter { it.kind == "show" }.take(2)
     }
+    val listeningSuggestions = snapshot.recommendations.ifEmpty { snapshot.savedTracks }
     LazyColumn(
         Modifier.fillMaxSize().semantics { testTag = "home-list" },
         contentPadding = PaddingValues(20.dp),
@@ -482,12 +483,17 @@ private fun HomeScreen(
                 }
             }
         }
-        if (snapshot.recommendations.isNotEmpty()) {
-            item { SectionTitle("Рекомендуем для вас") }
+        if (listeningSuggestions.isNotEmpty()) {
+            item {
+                SectionTitle(
+                    if (snapshot.recommendations.isNotEmpty()) "Рекомендуем для вас"
+                    else "Из вашей медиатеки",
+                )
+            }
             item {
                 LazyRow(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                     itemsIndexed(
-                        snapshot.recommendations,
+                        listeningSuggestions,
                         key = { index, track -> "recommended-$index-${track.uri}" },
                     ) { _, track ->
                         TrackMediaCard(track, Modifier.width(if (wide) 190.dp else 164.dp)) { viewModel.play(track) }
@@ -571,7 +577,9 @@ private fun SearchScreen(
         item {
             Button(
                 onClick = { viewModel.search(query); keyboard?.hide() },
-                enabled = query.trim().isNotEmpty() && !snapshot.busy,
+                // A background home refresh must not disable search. Search
+                // owns its latest-query guard in the native core.
+                enabled = query.trim().isNotEmpty(),
                 modifier = Modifier.fillMaxWidth(),
             ) {
                 Icon(Icons.Default.Search, null)
@@ -583,10 +591,11 @@ private fun SearchScreen(
         snapshot.error?.let { error -> item { ErrorCard(error) } }
         if (snapshot.searchQuery.isEmpty() && snapshot.searchResults.isEmpty()) {
             item { Text("Введите название трека, исполнителя, альбома или плейлиста", color = TextSecondary) }
-            if (snapshot.topTracks.isNotEmpty()) {
+            val suggestions = snapshot.topTracks.ifEmpty { snapshot.savedTracks }
+            if (suggestions.isNotEmpty()) {
                 item { SectionTitle("Для вас") }
                 itemsIndexed(
-                    snapshot.topTracks.take(8),
+                    suggestions.take(8),
                     key = { index, track -> "search-suggestion-$index-${track.id}" },
                 ) { _, track ->
                     TrackRow(track, { viewModel.play(track) }, viewModel, snapshot.playlists)

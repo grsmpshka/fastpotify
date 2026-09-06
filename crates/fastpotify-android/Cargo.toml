@@ -1,6 +1,6 @@
 [package]
 name = "fastpotify-android"
-version = "0.6.0-android.4"
+version = "0.6.0-android.5"
 edition = "2024"
 rust-version = "1.95"
 license = "MIT"
@@ -17,4 +17,8 @@ jni = "0.21"
 serde_json = "1"
 
 [target.'cfg(target_os = "android")'.dependencies]
+# Native Web API and librespot failures must be visible in adb logcat on
+# devices where reproducing an account or carrier-network issue is difficult.
+android_logger = "0.15.1"
+log = "0.4"
 ndk-context = "0.1"

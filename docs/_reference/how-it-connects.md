@@ -60,6 +60,10 @@ Spotify-owned catalogue playlists, it falls back to Spotify's deprecated
   GitHub's SHA-256 digest and the app signing certificate, then hands the file
   to Android's system installer. Android may ask you to allow installs from
   Fastpotify the first time. The application cannot install an update silently.
+- The Android client keeps the last successful library and catalogue snapshot
+  so an Activity or process restart does not replace already loaded cards with
+  an empty home screen. The snapshot contains no credentials and is refreshed
+  from Spotify in the background.
 
 ## When Spotify pushes back
 
@@ -104,6 +108,12 @@ The engine discovers access points through `apresolve.spotify.com` and
 connects over TCP in the resolver's preference order: port 4070 first,
 falling back to 443 and 80. Only outbound connections are needed; no
 inbound ports have to be open.
+
+On Android, a play tap made before the local engine is authorized is retained
+by the native core while the browser grant runs. It is sent after the phone is
+registered as a Spotify Connect device, even if Android recreated the Activity
+during the browser round trip. A connection that cannot reach Spotify ends
+with a visible error after 45 seconds instead of spinning forever.
 
 Each access-point attempt gives socket setup and the handshake a combined
 five seconds. A stalled TCP connection or HTTP proxy tunnel therefore lets

@@ -1,20 +1,20 @@
-This Android preview fixes the broken Spotify request limits that prevented search and playlist pages from working, and makes local playback survive Android screen and service recreation.
+This Android preview fixes the lost playback command shown in the real-device recording and keeps useful library content visible while Spotify refreshes in the background.
 
 ## Fixed
 
-- **Playlists open again.** Playlist pages now request Spotify's supported page size and use the compatibility endpoint when Spotify restricts the current endpoint for catalogue playlists.
-- **Search returns results.** Search uses Spotify's current per-type limit, runs after typing, and retries compatible content groups if one market-specific type is rejected.
-- **The library appears first.** Playlists and saved tracks no longer wait for recommendations, history, podcasts, and other optional home shelves.
-- **Failures no longer look like endless loading.** A failed playlist page shows Spotify's actual error and a way back.
-- **Playback survives Android recreation.** Activity and foreground-service startup reuse the existing native runtime instead of replacing the librespot session.
-- **Long lists remain stable.** The scrolling stress suite still covers duplicate tracks, playlists, queue rows, and repeated recomposition.
+- **The selected song starts after playback authorization.** The pending song now lives in the native core, survives the browser round trip and Activity recreation, and is sent to librespot after the phone registers as a Spotify Connect device.
+- **Spotify connection failures stop spinning.** Web requests have finite connection and request deadlines, and a stalled librespot connection reports an actionable error after 45 seconds.
+- **Sign-in reaches the app sooner.** A successful OAuth grant enters the signed-in interface before optional home data finishes loading.
+- **Search remains usable during refresh.** A slow home refresh no longer disables the search action.
+- **Previously loaded content survives a restart.** The last successful credential-free library snapshot is shown while fresh Spotify data loads.
 
 ## New
 
-- **Search is useful before typing.** Top tracks and artists appear as initial suggestions when Spotify has loaded them.
+- **Home and search no longer start empty.** Saved tracks fill recommendation and search shelves when Spotify's optional personalization endpoints return nothing.
+- **Real-device failures are diagnosable.** Native Spotify and librespot errors are now available in Android logcat without recording credentials.
 
 ## Thanks
 
-Thanks to the user who reported the real-device failures and insisted that the Android port be checked against actual Spotify behavior, and to the Fastpotify and librespot contributors whose shared client and playback engine power the app.
+Thanks to the user who supplied the real-device recording that exposed the lost playback command and network stalls, and to the Fastpotify and librespot contributors whose shared client and playback engine power the app.
 
-Full changelog: `v0.6.0-android.3...v0.6.0-android.4`
+Full changelog: `v0.6.0-android.4...v0.6.0-android.5`

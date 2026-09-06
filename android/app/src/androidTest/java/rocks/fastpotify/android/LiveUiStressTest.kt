@@ -2,6 +2,7 @@ package rocks.fastpotify.android
 
 import androidx.activity.compose.setContent
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.assertIsEnabled
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithContentDescription
@@ -137,6 +138,45 @@ class LiveUiStressTest {
         compose.onNodeWithText("Поиск").performClick()
         compose.onNodeWithText("Что хотите послушать?").performTextInput("Muse")
         compose.waitUntil(5_000) { controller.lastSearch.get() == "Muse" }
+        assertTrue(controller.lastSearch.get() == "Muse")
+    }
+
+    @Test
+    fun savedTracksFillHomeAndSearchWhileOptionalSpotifyShelvesLoad() {
+        val track = LiveTrack(
+            id = "saved",
+            uri = "spotify:track:saved",
+            title = "Saved fallback",
+            artist = "Artist",
+            album = "Album",
+            imageUrl = null,
+            durationMs = 180_000,
+            explicit = false,
+        )
+        val controller = FakeController(
+            LiveSnapshot(
+                authState = AuthState.SignedIn,
+                busy = true,
+                savedTracks = listOf(track),
+            ),
+        )
+        compose.activity.setContent {
+            FastpotifyTheme {
+                LiveFastpotifyApp(
+                    controller,
+                    UiProfile.Phone,
+                    {},
+                    {},
+                    requestNotificationPermission = false,
+                )
+            }
+        }
+
+        compose.onNodeWithText("Из вашей медиатеки").assertIsDisplayed()
+        compose.onNodeWithText("Поиск").performClick()
+        compose.onNodeWithText("Saved fallback").assertIsDisplayed()
+        compose.onNodeWithText("Что хотите послушать?").performTextInput("Muse")
+        compose.onNodeWithText("Найти").assertIsEnabled().performClick()
         assertTrue(controller.lastSearch.get() == "Muse")
     }
 

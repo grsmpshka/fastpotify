@@ -46,9 +46,6 @@ class LiveViewModel(application: Application) : AndroidViewModel(application), L
     private var serviceRunning = false
     @Volatile private var localSignInRequested = false
     @Volatile private var pendingUri: String? = null
-    @Volatile private var pendingPlaybackUri: String? = null
-    @Volatile private var pendingTrack: LiveTrack? = null
-    @Volatile private var pendingTrackContext: String? = null
 
     init {
         viewModelScope.launch(Dispatchers.IO) {
@@ -69,15 +66,6 @@ class LiveViewModel(application: Application) : AndroidViewModel(application), L
                             }
                             if (next.localPlayback == LocalPlaybackState.Connected) {
                                 localSignInRequested = false
-                                pendingTrack?.let { track ->
-                                    pendingTrackContext?.let { context ->
-                                        NativeBridge.playContext(track.toJson(), context)
-                                    } ?: NativeBridge.playTrack(track.toJson())
-                                }
-                                pendingTrack = null
-                                pendingTrackContext = null
-                                pendingPlaybackUri?.let { NativeBridge.command("play_uri", it) }
-                                pendingPlaybackUri = null
                             } else if (next.localPlayback == LocalPlaybackState.SignedOut && next.localError != null) {
                                 localSignInRequested = false
                             }
@@ -124,36 +112,18 @@ class LiveViewModel(application: Application) : AndroidViewModel(application), L
     override fun command(action: String, value: String) = NativeBridge.command(action, value)
 
     override fun play(track: LiveTrack) {
-        if (hasPlaybackTarget()) {
-            NativeBridge.playTrack(track.toJson())
-        } else {
-            pendingPlaybackUri = null
-            pendingTrackContext = null
-            pendingTrack = track
-            startLocalPlayback()
-        }
+        NativeBridge.playTrack(track.toJson())
+        if (!hasPlaybackTarget()) startLocalPlayback()
     }
 
     override fun playInContext(track: LiveTrack, contextUri: String) {
-        if (hasPlaybackTarget()) {
-            NativeBridge.playContext(track.toJson(), contextUri)
-        } else {
-            pendingPlaybackUri = null
-            pendingTrack = track
-            pendingTrackContext = contextUri
-            startLocalPlayback()
-        }
+        NativeBridge.playContext(track.toJson(), contextUri)
+        if (!hasPlaybackTarget()) startLocalPlayback()
     }
 
     override fun playUri(uri: String) {
-        if (hasPlaybackTarget()) {
-            NativeBridge.command("play_uri", uri)
-        } else {
-            pendingTrack = null
-            pendingTrackContext = null
-            pendingPlaybackUri = uri
-            startLocalPlayback()
-        }
+        NativeBridge.command("play_uri", uri)
+        if (!hasPlaybackTarget()) startLocalPlayback()
     }
 
     override fun queue(track: LiveTrack) = NativeBridge.queueTrack(track.toJson())

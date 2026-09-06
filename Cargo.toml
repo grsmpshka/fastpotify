@@ -4,7 +4,7 @@ resolver = "2"
 
 [package]
 name = "fastpotify"
-version = "0.6.0-android.4"
+version = "0.6.0-android.5"
 edition = "2024"
 rust-version = "1.95"
 license = "MIT"
