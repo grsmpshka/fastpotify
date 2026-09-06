@@ -1,6 +1,6 @@
 [package]
 name = "fastpotify-core"
-version = "0.6.0-android.8"
+version = "0.6.0-android.9"
 edition = "2024"
 rust-version = "1.95"
 license = "MIT"
@@ -13,9 +13,9 @@ base64 = "0.22"
 cpal = "0.16"
 log = "0.4"
 librespot-connect = { version = "0.8", default-features = false }
-librespot-core = { version = "0.8", default-features = false, features = ["rustls-tls-native-roots"] }
+librespot-core = { version = "0.8", default-features = false, features = ["rustls-tls-webpki-roots"] }
 librespot-metadata = { version = "0.8", default-features = false }
-librespot-playback = { version = "0.8", default-features = false, features = ["rodio-backend", "rustls-tls-native-roots"] }
+librespot-playback = { version = "0.8", default-features = false, features = ["rodio-backend", "rustls-tls-webpki-roots"] }
 librespot-protocol = { version = "0.8", default-features = false }
 protobuf = "3"
 rand = "0.9"

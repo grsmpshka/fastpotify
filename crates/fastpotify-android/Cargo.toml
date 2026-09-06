@@ -1,6 +1,6 @@
 [package]
 name = "fastpotify-android"
-version = "0.6.0-android.8"
+version = "0.6.0-android.9"
 edition = "2024"
 rust-version = "1.95"
 license = "MIT"

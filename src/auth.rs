@@ -417,6 +417,10 @@ impl StoredToken {
         now_secs() >= self.expires_at
     }
 
+    pub fn expires_in(&self) -> Duration {
+        Duration::from_secs(self.expires_at.saturating_sub(now_secs()))
+    }
+
     /// Whether the grant covers every scope in `scopes`. A grant cannot be
     /// widened by a refresh, only by the browser.
     pub fn has_scopes(&self, scopes: &[&str]) -> bool {
@@ -601,6 +605,7 @@ mod tests {
         };
         let token = StoredToken::from_response("id", response, None).unwrap();
         assert!(!token.needs_refresh());
+        assert!(token.expires_in() > Duration::from_secs(3500));
         assert!(token.has_scopes(&["x"]));
         assert!(!token.has_scopes(&["x", "y"]));
         let expired = StoredToken {

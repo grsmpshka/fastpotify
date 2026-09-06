@@ -122,6 +122,14 @@ by the native core while the browser grant runs. It is sent after the phone is
 registered as a Spotify Connect device, even if Android recreated the Activity
 during the browser round trip. A connection that cannot reach Spotify ends
 with a visible error after 45 seconds instead of spinning forever.
+The Android session keeps the same public desktop client identity that minted
+the playback grant, and uses librespot's bundled WebPKI roots because Android
+does not expose its native CA store to Rust.
+It retains the bearer token that Spotify issued for the `streaming` scope
+instead of converting it through login5. The refresh token is stored in the
+same private, atomically written application storage as the Web API grant,
+refreshed five minutes before expiry, and applied to the active playback
+session without interrupting the current track.
 
 Each access-point attempt gives socket setup and the handshake a combined
 five seconds. A stalled TCP connection or HTTP proxy tunnel therefore lets

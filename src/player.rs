@@ -9,7 +9,7 @@
 
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
-use std::time::{Duration, Instant};
+use std::time::{Duration, Instant, SystemTime};
 
 use anyhow::{Context, Result, anyhow};
 use librespot_connect::{
@@ -23,6 +23,7 @@ use librespot_core::{
     error::ErrorKind,
     session::Session,
     spotify_id::SpotifyId,
+    token::Token,
 };
 use librespot_metadata::audio::{AudioItem, UniqueFields};
 use librespot_playback::{
@@ -283,11 +284,15 @@ impl Engine {
         notify: Notify,
     ) -> Result<Self> {
         let device_id = config.device_id();
-        let session_config = SessionConfig {
-            device_id: device_id.clone(),
-            autoplay: Some(config.autoplay),
-            ..SessionConfig::default()
-        };
+        let session_config = session_config(
+            device_id.clone(),
+            config.autoplay,
+            if cfg!(target_os = "android") {
+                Some(crate::auth::PLAYBACK_CLIENT_ID)
+            } else {
+                None
+            },
+        );
         let normalisation_factor = Arc::new(std::sync::atomic::AtomicU64::new(1.0f64.to_bits()));
         let player_config = PlayerConfig {
             bitrate: config.bitrate(),
@@ -318,7 +323,20 @@ impl Engine {
             volume: config.initial_volume,
             ..LocalState::default()
         }));
+        let oauth_access_token = (credentials.auth_type
+            == librespot_protocol::authentication::AuthenticationType::AUTHENTICATION_SPOTIFY_TOKEN)
+            .then(|| String::from_utf8(credentials.auth_data.clone()).ok())
+            .flatten();
         let session = Session::new(session_config, Some(cache));
+        if let Some(access_token) = oauth_access_token {
+            session.login5().set_auth_token(Token {
+                access_token,
+                expires_in: Duration::from_secs(60 * 60),
+                token_type: "Bearer".into(),
+                scopes: Vec::new(),
+                timestamp: SystemTime::now(),
+            });
+        }
         let audio = AudioControl::new(config.buffer_ms);
         let (sink_builder, volume) = sink_builder(
             config,
@@ -401,6 +419,18 @@ impl Engine {
             shutting_down,
             audio,
         })
+    }
+
+    /// Replaces the bearer token used by librespot HTTP requests after an
+    /// OAuth refresh without rebuilding the active playback session.
+    pub fn set_oauth_access_token(&self, access_token: String, expires_in: Duration) {
+        self.session.login5().set_auth_token(Token {
+            access_token,
+            expires_in,
+            token_type: "Bearer".into(),
+            scopes: Vec::new(),
+            timestamp: SystemTime::now(),
+        });
     }
 
     /// Playback state to resume after replacing this engine.
@@ -585,6 +615,25 @@ impl Engine {
         }
         Ok(())
     }
+}
+
+fn session_config(
+    device_id: String,
+    autoplay: bool,
+    oauth_client_id: Option<&str>,
+) -> SessionConfig {
+    let mut config = SessionConfig {
+        device_id,
+        autoplay: Some(autoplay),
+        ..SessionConfig::default()
+    };
+    if let Some(client_id) = oauth_client_id {
+        // A librespot access token is bound to the OAuth client that minted
+        // it. Android's librespot default is the official mobile client, but
+        // our browser grant uses the public Keymaster/Desktop client.
+        config.client_id = client_id.to_owned();
+    }
+    config
 }
 
 fn command_interrupts_audio(state: &LocalState, command: &PlayerCommand) -> bool {
@@ -1140,6 +1189,15 @@ mod tests {
         let id = config.device_id();
         assert_eq!(id.len(), 40);
         assert_eq!(id, config.device_id());
+    }
+
+    #[test]
+    fn oauth_client_identity_is_kept_for_session_login() {
+        let config = session_config("device".into(), true, Some("oauth-client"));
+
+        assert_eq!(config.client_id, "oauth-client");
+        assert_eq!(config.device_id, "device");
+        assert_eq!(config.autoplay, Some(true));
     }
 
     /// A track that was playing or paused is remembered with its position;

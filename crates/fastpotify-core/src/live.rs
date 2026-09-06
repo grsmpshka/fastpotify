@@ -23,6 +23,7 @@ use crate::player::{
 use librespot_core::{authentication::Credentials, cache::Cache};
 
 const TOKEN_FILE: &str = "spotify-web-token.json";
+const PLAYBACK_TOKEN_FILE: &str = "spotify-playback-token.json";
 const SETTINGS_FILE: &str = "android-settings.json";
 const SNAPSHOT_CACHE_FILE: &str = "spotify-content-cache.json";
 const IMAGE_TARGET: u32 = 360;
@@ -180,6 +181,7 @@ pub struct MobileClient {
     http: reqwest::Client,
     state: Arc<Mutex<State>>,
     token_path: PathBuf,
+    playback_token_path: PathBuf,
     snapshot_cache_path: PathBuf,
     files_dir: PathBuf,
 }
@@ -200,6 +202,7 @@ impl MobileClient {
         let files_dir = files_dir.as_ref().to_path_buf();
         std::fs::create_dir_all(&files_dir).context("unable to create the app data directory")?;
         let token_path = files_dir.join(TOKEN_FILE);
+        let playback_token_path = files_dir.join(PLAYBACK_TOKEN_FILE);
         let snapshot_cache_path = files_dir.join(SNAPSHOT_CACHE_FILE);
         let settings = load_settings(&files_dir);
         let token =
@@ -239,6 +242,7 @@ impl MobileClient {
                 pending_load: None,
             })),
             token_path,
+            playback_token_path,
             snapshot_cache_path,
             files_dir,
         };
@@ -340,6 +344,7 @@ impl MobileClient {
 
     pub fn sign_out(&self) {
         StoredToken::remove(&self.token_path);
+        StoredToken::remove(&self.playback_token_path);
         let _ = std::fs::remove_file(&self.snapshot_cache_path);
         let engine = {
             let mut state = lock(&self.state);
@@ -377,6 +382,7 @@ impl MobileClient {
         let url = flow.url.clone();
         let state = Arc::clone(&self.state);
         let http = self.http.clone();
+        let playback_token_path = self.playback_token_path.clone();
         let config = playback_config(&self.files_dir, &lock(&self.state).snapshot.settings);
         self.runtime.spawn(async move {
             let result = async {
@@ -388,10 +394,17 @@ impl MobileClient {
                     Some(ANDROID_OAUTH_COMPLETION_URI),
                 )
                 .await?;
-                let token = auth::exchange_code(&http, &grant, &code, &flow.verifier).await?;
-                let cache = config.open_cache()?;
-                let credentials = Credentials::with_access_token(token.access_token);
-                connect_engine(config, credentials, cache, Arc::clone(&state)).await
+                let response = auth::exchange_code(&http, &grant, &code, &flow.verifier).await?;
+                let token = StoredToken::from_response(&grant.client_id, response, None)?;
+                token.save(&playback_token_path)?;
+                connect_with_playback_token(
+                    &http,
+                    &playback_token_path,
+                    token,
+                    config,
+                    Arc::clone(&state),
+                )
+                .await
             }
             .await;
             if let Err(error) = result {
@@ -410,6 +423,32 @@ impl MobileClient {
 
     fn restore_local_playback(&self) {
         let config = playback_config(&self.files_dir, &lock(&self.state).snapshot.settings);
+        if let Some(token) = StoredToken::load(&self.playback_token_path)
+            .filter(|token| token.client_id == auth::PLAYBACK_CLIENT_ID)
+        {
+            {
+                let mut state = lock(&self.state);
+                state.snapshot.local_playback = LocalPlaybackState::Connecting;
+                bump(&mut state.snapshot);
+            }
+            let state = Arc::clone(&self.state);
+            let http = self.http.clone();
+            let playback_token_path = self.playback_token_path.clone();
+            self.runtime.spawn(async move {
+                if let Err(error) = connect_with_playback_token(
+                    &http,
+                    &playback_token_path,
+                    token,
+                    config,
+                    Arc::clone(&state),
+                )
+                .await
+                {
+                    playback_connection_error(&state, "Spotify Connect", &error);
+                }
+            });
+            return;
+        }
         let Ok(cache) = config.open_cache() else {
             return;
         };
@@ -426,13 +465,7 @@ impl MobileClient {
             if let Err(error) = connect_engine(config, credentials, cache, Arc::clone(&state)).await
             {
                 log::warn!("Android Spotify Connect restore failed: {error:#}");
-                let mut guard = lock(&state);
-                guard.snapshot.local_playback = LocalPlaybackState::SignedOut;
-                guard.snapshot.local_error = Some(format!("Spotify Connect: {error}"));
-                if let Some(now) = guard.snapshot.now_playing.as_mut() {
-                    now.playing = false;
-                }
-                bump(&mut guard.snapshot);
+                playback_connection_error(&state, "Spotify Connect", &error);
             }
         });
     }
@@ -823,19 +856,23 @@ impl MobileClient {
         if let Some(engine) = had_engine {
             engine.shutdown();
             let config = playback_config(&self.files_dir, &settings);
-            if let Ok(cache) = config.open_cache()
-                && let Some(credentials) = cache.credentials()
+            if let Some(token) = StoredToken::load(&self.playback_token_path)
+                .filter(|token| token.client_id == auth::PLAYBACK_CLIENT_ID)
             {
                 let state = Arc::clone(&self.state);
+                let http = self.http.clone();
+                let playback_token_path = self.playback_token_path.clone();
                 self.runtime.spawn(async move {
-                    if let Err(error) =
-                        connect_engine(config, credentials, cache, Arc::clone(&state)).await
+                    if let Err(error) = connect_with_playback_token(
+                        &http,
+                        &playback_token_path,
+                        token,
+                        config,
+                        Arc::clone(&state),
+                    )
+                    .await
                     {
-                        let mut guard = lock(&state);
-                        guard.snapshot.local_playback = LocalPlaybackState::SignedOut;
-                        guard.snapshot.local_error =
-                            Some(format!("Настройки воспроизведения: {error}"));
-                        bump(&mut guard.snapshot);
+                        playback_connection_error(&state, "Настройки воспроизведения", &error);
                     }
                 });
             }
@@ -1264,6 +1301,90 @@ fn save_cached_snapshot(path: &Path, snapshot: &LiveSnapshot) -> Result<()> {
     std::fs::write(&temporary, bytes).context("unable to write the Spotify content cache")?;
     std::fs::rename(&temporary, path).context("unable to replace the Spotify content cache")?;
     Ok(())
+}
+
+async fn connect_with_playback_token(
+    http: &reqwest::Client,
+    token_path: &Path,
+    mut token: StoredToken,
+    config: EngineConfig,
+    state: Arc<Mutex<State>>,
+) -> Result<()> {
+    if token.needs_refresh() {
+        let response = auth::refresh(http, &token.client_id, &token.refresh_token)
+            .await
+            .map_err(anyhow::Error::new)?;
+        token = StoredToken::from_response(&token.client_id, response, Some(&token.refresh_token))?;
+        token.save(token_path)?;
+    }
+
+    let cache = config.open_cache()?;
+    let credentials = Credentials::with_access_token(token.access_token.clone());
+    connect_engine(config, credentials, cache, Arc::clone(&state)).await?;
+    if let Some(engine) = lock(&state).engine.clone() {
+        engine.set_oauth_access_token(token.access_token.clone(), token.expires_in());
+    }
+    spawn_playback_token_refresh(http.clone(), token_path.to_path_buf(), token, state);
+    Ok(())
+}
+
+fn spawn_playback_token_refresh(
+    http: reqwest::Client,
+    token_path: PathBuf,
+    mut token: StoredToken,
+    state: Arc<Mutex<State>>,
+) {
+    tokio::spawn(async move {
+        const REFRESH_EARLY: Duration = Duration::from_secs(5 * 60);
+        const RETRY_DELAY: Duration = Duration::from_secs(30);
+        loop {
+            let wait = token
+                .expires_in()
+                .saturating_sub(REFRESH_EARLY)
+                .max(RETRY_DELAY);
+            tokio::time::sleep(wait).await;
+            let response = match auth::refresh(&http, &token.client_id, &token.refresh_token).await
+            {
+                Ok(response) => response,
+                Err(error) => {
+                    log::warn!("Android playback token refresh failed: {error}");
+                    continue;
+                }
+            };
+            let refreshed = match StoredToken::from_response(
+                &token.client_id,
+                response,
+                Some(&token.refresh_token),
+            ) {
+                Ok(refreshed) => refreshed,
+                Err(error) => {
+                    log::warn!("Android playback token response was incomplete: {error}");
+                    continue;
+                }
+            };
+            if let Err(error) = refreshed.save(&token_path) {
+                log::warn!("unable to save refreshed Android playback token: {error}");
+                continue;
+            }
+            if let Some(engine) = lock(&state).engine.clone() {
+                engine
+                    .set_oauth_access_token(refreshed.access_token.clone(), refreshed.expires_in());
+            } else {
+                return;
+            }
+            token = refreshed;
+        }
+    });
+}
+
+fn playback_connection_error(state: &Arc<Mutex<State>>, label: &str, error: &anyhow::Error) {
+    let mut guard = lock(state);
+    guard.snapshot.local_playback = LocalPlaybackState::SignedOut;
+    guard.snapshot.local_error = Some(format!("{label}: {error}"));
+    if let Some(now) = guard.snapshot.now_playing.as_mut() {
+        now.playing = false;
+    }
+    bump(&mut guard.snapshot);
 }
 
 async fn connect_engine(

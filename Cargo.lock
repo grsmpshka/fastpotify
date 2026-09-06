@@ -1740,7 +1740,7 @@ dependencies = [
 
 [[package]]
 name = "fastpotify"
-version = "0.6.0-android.8"
+version = "0.6.0-android.9"
 dependencies = [
  "aes",
  "anyhow",
@@ -1801,7 +1801,7 @@ dependencies = [
 
 [[package]]
 name = "fastpotify-android"
-version = "0.6.0-android.8"
+version = "0.6.0-android.9"
 dependencies = [
  "android_logger",
  "anyhow",
@@ -1814,7 +1814,7 @@ dependencies = [
 
 [[package]]
 name = "fastpotify-core"
-version = "0.6.0-android.8"
+version = "0.6.0-android.9"
 dependencies = [
  "anyhow",
  "base64",
@@ -2457,6 +2457,7 @@ dependencies = [
  "tokio-rustls 0.25.0",
  "tower-service",
  "webpki",
+ "webpki-roots 0.26.11",
 ]
 
 [[package]]
@@ -2476,6 +2477,7 @@ dependencies = [
  "tokio",
  "tokio-rustls 0.25.0",
  "tower-service",
+ "webpki-roots 0.26.11",
 ]
 
 [[package]]
@@ -2492,7 +2494,7 @@ dependencies = [
  "tokio",
  "tokio-rustls 0.26.4",
  "tower-service",
- "webpki-roots",
+ "webpki-roots 1.0.9",
 ]
 
 [[package]]
@@ -3055,7 +3057,7 @@ dependencies = [
 [[package]]
 name = "librespot-audio"
 version = "0.8.0"
-source = "git+https://github.com/crmne/librespot?branch=fastpotify-0.8#19a00c211df274f2ae70aece69d46bd4116267ed"
+source = "git+https://github.com/grsmpshka/librespot?rev=37a565df7d4dfe247098791708716857602e8a39#37a565df7d4dfe247098791708716857602e8a39"
 dependencies = [
  "aes",
  "bytes",
@@ -3074,7 +3076,7 @@ dependencies = [
 [[package]]
 name = "librespot-connect"
 version = "0.8.0"
-source = "git+https://github.com/crmne/librespot?branch=fastpotify-0.8#19a00c211df274f2ae70aece69d46bd4116267ed"
+source = "git+https://github.com/grsmpshka/librespot?rev=37a565df7d4dfe247098791708716857602e8a39#37a565df7d4dfe247098791708716857602e8a39"
 dependencies = [
  "futures-util",
  "librespot-core",
@@ -3093,7 +3095,7 @@ dependencies = [
 [[package]]
 name = "librespot-core"
 version = "0.8.0"
-source = "git+https://github.com/crmne/librespot?branch=fastpotify-0.8#19a00c211df274f2ae70aece69d46bd4116267ed"
+source = "git+https://github.com/grsmpshka/librespot?rev=37a565df7d4dfe247098791708716857602e8a39#37a565df7d4dfe247098791708716857602e8a39"
 dependencies = [
  "aes",
  "base64",
@@ -3149,7 +3151,7 @@ dependencies = [
 [[package]]
 name = "librespot-metadata"
 version = "0.8.0"
-source = "git+https://github.com/crmne/librespot?branch=fastpotify-0.8#19a00c211df274f2ae70aece69d46bd4116267ed"
+source = "git+https://github.com/grsmpshka/librespot?rev=37a565df7d4dfe247098791708716857602e8a39#37a565df7d4dfe247098791708716857602e8a39"
 dependencies = [
  "async-trait",
  "bytes",
@@ -3166,7 +3168,7 @@ dependencies = [
 [[package]]
 name = "librespot-oauth"
 version = "0.8.0"
-source = "git+https://github.com/crmne/librespot?branch=fastpotify-0.8#19a00c211df274f2ae70aece69d46bd4116267ed"
+source = "git+https://github.com/grsmpshka/librespot?rev=37a565df7d4dfe247098791708716857602e8a39#37a565df7d4dfe247098791708716857602e8a39"
 dependencies = [
  "log",
  "oauth2",
@@ -3179,7 +3181,7 @@ dependencies = [
 [[package]]
 name = "librespot-playback"
 version = "0.8.0"
-source = "git+https://github.com/crmne/librespot?branch=fastpotify-0.8#19a00c211df274f2ae70aece69d46bd4116267ed"
+source = "git+https://github.com/grsmpshka/librespot?rev=37a565df7d4dfe247098791708716857602e8a39#37a565df7d4dfe247098791708716857602e8a39"
 dependencies = [
  "cpal",
  "form_urlencoded",
@@ -3204,7 +3206,7 @@ dependencies = [
 [[package]]
 name = "librespot-protocol"
 version = "0.8.0"
-source = "git+https://github.com/crmne/librespot?branch=fastpotify-0.8#19a00c211df274f2ae70aece69d46bd4116267ed"
+source = "git+https://github.com/grsmpshka/librespot?rev=37a565df7d4dfe247098791708716857602e8a39#37a565df7d4dfe247098791708716857602e8a39"
 dependencies = [
  "protobuf",
  "protobuf-codegen",
@@ -4820,7 +4822,7 @@ dependencies = [
  "wasm-bindgen",
  "wasm-bindgen-futures",
  "web-sys",
- "webpki-roots",
+ "webpki-roots 1.0.9",
 ]
 
 [[package]]
@@ -5959,6 +5961,7 @@ dependencies = [
  "tokio",
  "tokio-rustls 0.26.4",
  "tungstenite",
+ "webpki-roots 0.26.11",
 ]
 
 [[package]]
@@ -6654,6 +6657,15 @@ checksum = "ed63aea5ce73d0ff405984102c42de94fc55a6b75765d621c65262469b3c9b53"
 dependencies = [
  "ring",
  "untrusted",
+]
+
+[[package]]
+name = "webpki-roots"
+version = "0.26.11"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "521bc38abb08001b01866da9f51eb7c5d647a19260e00054a8c7fd5f9e57f7a9"
+dependencies = [
+ "webpki-roots 1.0.9",
 ]
 
 [[package]]
