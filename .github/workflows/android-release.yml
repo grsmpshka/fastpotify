@@ -34,6 +34,11 @@ jobs:
         with:
           workspaces: .
 
+      - name: Install shared audio build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libasound2-dev libpulse-dev
+
       - name: Install Android SDK and Rust builder
         run: |
           yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses >/dev/null
