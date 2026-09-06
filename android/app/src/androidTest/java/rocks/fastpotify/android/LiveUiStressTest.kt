@@ -3,7 +3,6 @@ package rocks.fastpotify.android
 import androidx.activity.compose.setContent
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
-import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithTag
@@ -73,11 +72,12 @@ class LiveUiStressTest {
         compose.onNodeWithContentDescription("Назад").performClick()
         compose.onNodeWithTag("mini-player").performClick()
         compose.onNodeWithContentDescription("Очередь").performClick()
+        compose.waitForIdle()
         compose.waitUntil(5_000) {
-            compose.onAllNodesWithTag("queue-list").fetchSemanticsNodes().isNotEmpty()
+            compose.onAllNodesWithText("Repeated song").fetchSemanticsNodes().size > 1
         }
         repeat(8) {
-            compose.onNodeWithTag("queue-list").performTouchInput { swipeUp() }
+            compose.onAllNodesWithText("Repeated song")[0].performTouchInput { swipeUp() }
             compose.waitForIdle()
         }
         compose.onNodeWithText("Очередь").assertIsDisplayed()
