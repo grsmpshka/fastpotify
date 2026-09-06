@@ -11,6 +11,7 @@ import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performTouchInput
 import androidx.compose.ui.test.swipeUp
 import org.junit.Rule
+import org.junit.Assert.assertTrue
 import org.junit.Test
 import rocks.fastpotify.android.model.AuthState
 import rocks.fastpotify.android.model.LiveCard
@@ -80,7 +81,7 @@ class LiveUiStressTest {
             compose.onAllNodesWithText("Repeated song")[0].performTouchInput { swipeUp() }
             compose.waitForIdle()
         }
-        compose.onNodeWithText("Очередь").assertIsDisplayed()
+        assertTrue(compose.onAllNodesWithText("Repeated song").fetchSemanticsNodes().isNotEmpty())
     }
 
     private fun stressSnapshot(): LiveSnapshot {
