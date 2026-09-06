@@ -61,6 +61,7 @@ import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
@@ -384,6 +385,12 @@ private fun HomeScreen(
     navigate: (LiveScreen) -> Unit,
     wide: Boolean,
 ) {
+    var filter by remember { mutableStateOf("Все") }
+    val quickCards = when (filter) {
+        "Подкасты" -> snapshot.libraryItems.filter { it.kind == "show" }
+        "Музыка" -> snapshot.playlists
+        else -> snapshot.playlists + snapshot.libraryItems.filter { it.kind == "show" }.take(2)
+    }
     LazyColumn(
         Modifier.fillMaxSize(),
         contentPadding = PaddingValues(20.dp),
@@ -391,15 +398,28 @@ private fun HomeScreen(
     ) {
         item { Text("Добрый день", fontSize = if (wide) 34.sp else 28.sp, fontWeight = FontWeight.Black) }
         item {
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                listOf("Все", "Музыка", "Подкасты").forEach { label ->
+                    FilterChip(selected = filter == label, onClick = { filter = label }, label = { Text(label) })
+                }
+            }
+        }
+        item {
             LazyRow(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                item { LikedSongsMediaCard(Modifier.width(if (wide) 190.dp else 168.dp)) { navigate(LiveScreen.Library) } }
-                items(snapshot.playlists.take(8), key = { "quick-${it.id}" }) { card ->
+                if (filter != "Подкасты") {
+                    item { LikedSongsMediaCard(Modifier.width(if (wide) 190.dp else 168.dp)) { navigate(LiveScreen.Library) } }
+                }
+                items(quickCards.take(8), key = { "quick-${it.kind}-${it.id}" }) { card ->
                     MediaCard(card, Modifier.width(if (wide) 190.dp else 168.dp)) {
-                        viewModel.openPlaylist(card.id)
+                        viewModel.openContent(card.kind, card.id)
                         navigate(LiveScreen.Playlist)
                     }
                 }
             }
+        }
+        snapshot.topTracks.firstOrNull()?.let { featured ->
+            item { SectionTitle("Специально для тебя") }
+            item { FeaturedTrack(featured, wide) { viewModel.play(featured) } }
         }
         if (snapshot.recentTracks.isNotEmpty()) {
             item { SectionTitle("Недавно прослушано") }
@@ -414,6 +434,36 @@ private fun HomeScreen(
             }
         }
         snapshot.error?.let { error -> item { ErrorCard(error) } }
+    }
+}
+
+@Composable
+private fun FeaturedTrack(track: LiveTrack, wide: Boolean, play: () -> Unit) {
+    Surface(color = SurfaceRaised, shape = RoundedCornerShape(12.dp)) {
+        if (wide) {
+            Row(Modifier.fillMaxWidth().padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
+                LiveArtwork(track.imageUrl, track.title, Modifier.size(170.dp))
+                Spacer(Modifier.width(18.dp))
+                FeaturedTrackText(track, play, Modifier.weight(1f))
+            }
+        } else {
+            Column(Modifier.fillMaxWidth().padding(14.dp)) {
+                LiveArtwork(track.imageUrl, track.title, Modifier.fillMaxWidth().aspectRatio(1.6f))
+                Spacer(Modifier.height(12.dp))
+                FeaturedTrackText(track, play, Modifier.fillMaxWidth())
+            }
+        }
+    }
+}
+
+@Composable
+private fun FeaturedTrackText(track: LiveTrack, play: () -> Unit, modifier: Modifier) {
+    Column(modifier) {
+        Text("ДЛЯ ВАС", color = Accent, fontWeight = FontWeight.Bold)
+        Text(track.title, fontSize = 26.sp, fontWeight = FontWeight.Black, maxLines = 2)
+        Text("${track.artist} · ${track.album}", color = TextSecondary, maxLines = 2)
+        Spacer(Modifier.height(10.dp))
+        Button(onClick = play) { Icon(Icons.Default.PlayArrow, null); Text("Воспроизвести") }
     }
 }
 

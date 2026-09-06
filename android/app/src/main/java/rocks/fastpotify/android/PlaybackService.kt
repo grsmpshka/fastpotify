@@ -15,13 +15,28 @@ import android.media.session.PlaybackState
 import android.os.Handler
 import android.os.IBinder
 import android.graphics.drawable.Icon
+import android.graphics.Bitmap
 import android.os.Looper
 import rocks.fastpotify.android.model.LiveSnapshot
+import androidx.core.graphics.drawable.toBitmap
+import coil.ImageLoader
+import coil.request.ImageRequest
+import coil.request.SuccessResult
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.launch
 
 /** Keeps the native librespot engine alive and exposes lock-screen controls. */
 class PlaybackService : Service() {
     private lateinit var session: MediaSession
     private var focusRequest: AudioFocusRequest? = null
+    private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    private lateinit var imageLoader: ImageLoader
+    private var artworkUrl: String? = null
+    private var artwork: Bitmap? = null
+    private var resumeOnFocusGain = false
     private val handler = Handler(Looper.getMainLooper())
     private val update = object : Runnable {
         override fun run() {
@@ -34,6 +49,7 @@ class PlaybackService : Service() {
     override fun onCreate() {
         super.onCreate()
         createChannel()
+        imageLoader = ImageLoader(this)
         session = MediaSession(this, "Fastpotify").apply {
             setCallback(object : MediaSession.Callback() {
                 override fun onPlay() = command("play")
@@ -59,6 +75,8 @@ class PlaybackService : Service() {
 
     override fun onDestroy() {
         handler.removeCallbacks(update)
+        serviceScope.cancel()
+        imageLoader.shutdown()
         session.release()
         focusRequest?.let { (getSystemService(AUDIO_SERVICE) as AudioManager).abandonAudioFocusRequest(it) }
         super.onDestroy()
@@ -70,6 +88,7 @@ class PlaybackService : Service() {
 
     private fun publish(snapshot: LiveSnapshot) {
         val now = snapshot.nowPlaying
+        loadArtwork(now?.track?.imageUrl)
         val state = if (now?.playing == true) PlaybackState.STATE_PLAYING else PlaybackState.STATE_PAUSED
         session.setPlaybackState(
             PlaybackState.Builder()
@@ -86,6 +105,7 @@ class PlaybackService : Service() {
                 .putString(android.media.MediaMetadata.METADATA_KEY_TITLE, now?.track?.title ?: "Fastpotify")
                 .putString(android.media.MediaMetadata.METADATA_KEY_ARTIST, now?.track?.artist ?: "Spotify Connect")
                 .putLong(android.media.MediaMetadata.METADATA_KEY_DURATION, now?.track?.durationMs ?: 0L)
+                .apply { artwork?.let { putBitmap(android.media.MediaMetadata.METADATA_KEY_ALBUM_ART, it) } }
                 .build(),
         )
         getSystemService(NotificationManager::class.java).notify(NOTIFICATION_ID, notification(snapshot))
@@ -102,6 +122,7 @@ class PlaybackService : Service() {
             .setContentTitle(now?.track?.title ?: "Fastpotify")
             .setContentText(now?.track?.artist ?: "Устройство Spotify Connect готово")
             .setContentIntent(open)
+            .apply { artwork?.let(::setLargeIcon) }
             .setOngoing(now?.playing == true)
             .setCategory(Notification.CATEGORY_TRANSPORT)
             .setVisibility(Notification.VISIBILITY_PUBLIC)
@@ -133,10 +154,43 @@ class PlaybackService : Service() {
         focusRequest = AudioFocusRequest.Builder(AudioManager.AUDIOFOCUS_GAIN)
                 .setAudioAttributes(attributes)
                 .setOnAudioFocusChangeListener { focus ->
-                    if (focus <= AudioManager.AUDIOFOCUS_LOSS) command("pause")
+                    when (focus) {
+                        AudioManager.AUDIOFOCUS_GAIN -> if (resumeOnFocusGain) {
+                            resumeOnFocusGain = false
+                            command("play")
+                        }
+                        AudioManager.AUDIOFOCUS_LOSS -> {
+                            resumeOnFocusGain = false
+                            command("pause")
+                        }
+                        AudioManager.AUDIOFOCUS_LOSS_TRANSIENT,
+                        AudioManager.AUDIOFOCUS_LOSS_TRANSIENT_CAN_DUCK -> {
+                            resumeOnFocusGain = runCatching {
+                                LiveSnapshot.fromJson(NativeBridge.liveSnapshotJson()).nowPlaying?.playing == true
+                            }.getOrDefault(false)
+                            command("pause")
+                        }
+                    }
                 }
                 .build()
         manager.requestAudioFocus(focusRequest!!)
+    }
+
+    private fun loadArtwork(url: String?) {
+        if (url == artworkUrl) return
+        artworkUrl = url
+        artwork = null
+        if (url == null) return
+        serviceScope.launch {
+            val request = ImageRequest.Builder(this@PlaybackService).data(url).allowHardware(false).build()
+            val result = imageLoader.execute(request)
+            if (result is SuccessResult && artworkUrl == url) {
+                artwork = result.drawable.toBitmap()
+                handler.post {
+                    runCatching { LiveSnapshot.fromJson(NativeBridge.liveSnapshotJson()) }.onSuccess(::publish)
+                }
+            }
+        }
     }
 
     private fun createChannel() {
