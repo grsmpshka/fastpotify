@@ -64,18 +64,21 @@ pub extern "system" fn Java_rocks_fastpotify_android_NativeBridge_initialize(
 ) {
     let result = catch_unwind(AssertUnwindSafe(|| {
         if ANDROID_CONTEXT.get().is_none() {
-            let vm = env.get_java_vm().map_err(|error| error.to_string())?;
             let global = env
                 .new_global_ref(&context)
                 .map_err(|error| error.to_string())?;
             // CPAL uses ndk-context to reach Android's audio services. The
             // global reference keeps the application Context alive for the
             // lifetime of the native process.
-            unsafe {
-                ndk_context::initialize_android_context(
-                    vm.get_java_vm_pointer().cast(),
-                    global.as_obj().as_raw().cast(),
-                );
+            #[cfg(target_os = "android")]
+            {
+                let vm = env.get_java_vm().map_err(|error| error.to_string())?;
+                unsafe {
+                    ndk_context::initialize_android_context(
+                        vm.get_java_vm_pointer().cast(),
+                        global.as_obj().as_raw().cast(),
+                    );
+                }
             }
             let _ = ANDROID_CONTEXT.set(global);
         }
