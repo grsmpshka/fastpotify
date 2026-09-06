@@ -24,7 +24,7 @@ type, controls Spotify Connect devices, and plays locally through Fastpotify's
 existing librespot engine. Local playback requires Spotify Premium and one
 additional Spotify approval.
 
-**[Download Fastpotify for Android](https://github.com/grsmpshka/fastpotify/releases/download/v0.6.0-android.2/fastpotify-android.apk)**
+**[Download Fastpotify for Android](https://github.com/grsmpshka/fastpotify/releases/download/v0.6.0-android.3/fastpotify-android.apk)**
 
 The same signed APK includes arm64 and x86_64 builds. Its interface switches
 automatically between the Galaxy S24 Ultra-sized phone layout and the
