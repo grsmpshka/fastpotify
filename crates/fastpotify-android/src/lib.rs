@@ -25,6 +25,17 @@ pub extern "system" fn Java_rocks_fastpotify_android_NativeBridge_contractVersio
     fastpotify_core::CONTRACT_VERSION as jint
 }
 
+#[cfg(all(target_os = "android", debug_assertions))]
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_rocks_fastpotify_android_NativeBridge_audioProbe(
+    mut env: JNIEnv<'_>,
+    _class: JClass<'_>,
+) -> jstring {
+    string_result(&mut env, || {
+        fastpotify_core::sink::probe_output().map_err(anyhow::Error::msg)
+    })
+}
+
 #[unsafe(no_mangle)]
 pub extern "system" fn Java_rocks_fastpotify_android_NativeBridge_demoSnapshotJson(
     mut env: JNIEnv<'_>,
@@ -237,6 +248,23 @@ pub extern "system" fn Java_rocks_fastpotify_android_NativeBridge_playTrack(
     json: JString<'_>,
 ) {
     track_command(&mut env, &json, MobileClient::play_track);
+}
+
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_rocks_fastpotify_android_NativeBridge_playContext(
+    mut env: JNIEnv<'_>,
+    _class: JClass<'_>,
+    json: JString<'_>,
+    context_uri: JString<'_>,
+) {
+    let context_uri = env
+        .get_string(&context_uri)
+        .map(|value| value.to_string_lossy().into_owned());
+    if let Ok(context_uri) = context_uri {
+        track_command(&mut env, &json, |client, track| {
+            client.play_context(track, context_uri);
+        });
+    }
 }
 
 #[unsafe(no_mangle)]

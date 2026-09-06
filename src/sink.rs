@@ -639,6 +639,21 @@ fn open_output(
     })
 }
 
+/// Opens Android's real output path for an instrumentation health check.
+/// The stream is immediately dropped; no Spotify credential or network is
+/// involved, so failures identify the device/audio integration itself.
+#[cfg(target_os = "android")]
+pub fn probe_output() -> Result<String, String> {
+    let control = AudioControl::new(DEFAULT_BUFFER_MS);
+    let output =
+        open_output(None, DEFAULT_BUFFER_MS, &control).map_err(|error| error.to_string())?;
+    Ok(format!(
+        "{} Hz on {}",
+        output.sample_rate,
+        output.device_name.as_deref().unwrap_or("default output")
+    ))
+}
+
 #[cfg(test)]
 mod tests {
 

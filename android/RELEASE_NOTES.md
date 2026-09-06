@@ -1,24 +1,23 @@
-Fastpotify for Android is now a live Spotify client rather than an interface preview. It keeps the compact native design, but the library, artwork, controls, queue, devices, and playback now come from Spotify and Fastpotify's existing Rust engine.
+This Android preview focuses on reliability. Playback setup is now explicit, repeated Spotify items no longer crash long lists, and the home page contains the personalised shelves available to Fastpotify.
 
 ## New
 
-- **Real Spotify library and artwork.** Sign in on Spotify's page and browse playlists, Liked Songs, albums, followed artists, podcasts, episodes, recent listening, and top tracks with their real covers.
-- **Local Premium playback.** Fastpotify's existing librespot player runs on Android at up to 320 kbps and appears as a Spotify Connect device.
-- **Background media controls.** Playback continues through a foreground service with notification, lock-screen, headset, and system media controls.
-- **Full search and content pages.** Search songs, albums, artists, playlists, podcasts, and episodes, then open or play the result.
-- **Queue, devices, and playlists.** Control other Connect devices, seek, change volume, shuffle and repeat, edit the queue, create playlists, and add or remove playlist tracks.
-- **Playback settings.** Choose quality, normalisation, gapless playback, autoplay, and an audio-cache limit from inside the app.
-- **Spotify link handling.** Open `spotify:` and `open.spotify.com` links directly in Fastpotify.
-- **One adaptive APK.** The signed package covers Galaxy S24 Ultra-sized phones, arm64 devices, x86_64 systems, and the wide Voyah Free interface.
-- **Safe in-app updates.** Updates are accepted only when their checksum and permanent signing certificate match this app.
+- **Made for You is populated.** Discover Weekly, Release Radar, Daily Mix, and daylist use the same Spotify searches and filtering rules as the desktop client.
+- **More personal shelves.** The home page now shows top artists, recent listening, top tracks, and seeded recommendations as artwork cards.
+- **Functional parity is tracked.** A desktop-to-Android audit now records implemented features, platform differences, known gaps, and the release checks that cover them.
 
 ## Fixed
 
-- **Artwork keeps familiar proportions.** Covers remain square, center-cropped, and consistently spaced; Liked Songs has its dedicated gradient heart cover.
-- **Playback state stays current.** Optimistic controls respond immediately while Spotify and librespot catch up in the background.
+- **Long lists stay open.** Repeated tracks in history, playlists, and the queue now receive distinct Compose identities instead of crashing when scrolled into view.
+- **The first song starts after setup.** If no Spotify player is active, tapping a song starts the separate librespot authorization and remembers the request until the Android player connects.
+- **Playlist playback keeps its context.** Choosing a row loads its playlist, album, or Liked Songs context at that track instead of reducing it to an isolated item.
+- **Android uses the correct Connect identity.** The local receiver now registers as a smartphone and opens the same tested CPAL/rodio output used by the shared Fastpotify engine.
+- **Playback errors are visible.** Local and Spotify command failures appear near the top of Home and on the player instead of below several long sections.
+- **Artwork uses bounded memory.** Notification artwork is decoded at a controlled size to reduce background memory pressure.
+- **Notification permission no longer interrupts sign-in.** Android asks only after the local player has connected.
 
 ## Thanks
 
-Thanks to the Fastpotify and librespot contributors whose existing desktop engine, Web API client, and Spotify Connect implementation are reused by this Android release.
+Thanks to the user who reported the playback failure, scrolling crashes, and missing personalised playlists, and to the Fastpotify and librespot contributors whose shared client and audio engine power this release.
 
-Full changelog: `v0.6.0-android.1...v0.6.0-android.2`
+Full changelog: `v0.6.0-android.2...v0.6.0-android.3`

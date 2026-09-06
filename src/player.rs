@@ -339,7 +339,11 @@ impl Engine {
 
         let connect_config = ConnectConfig {
             name: config.device_name.clone(),
-            device_type: DeviceType::Computer,
+            device_type: if cfg!(target_os = "android") {
+                DeviceType::Smartphone
+            } else {
+                DeviceType::Computer
+            },
             initial_volume: config.initial_volume,
             disable_volume: false,
             volume_steps: 64,

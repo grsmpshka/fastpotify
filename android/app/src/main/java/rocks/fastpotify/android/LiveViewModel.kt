@@ -18,13 +18,37 @@ import rocks.fastpotify.android.model.LocalPlaybackState
 import rocks.fastpotify.android.model.MobileSettings
 import rocks.fastpotify.android.model.LiveTrack
 
-class LiveViewModel(application: Application) : AndroidViewModel(application) {
-    var snapshot by mutableStateOf(LiveSnapshot())
+interface LiveUiController {
+    val snapshot: LiveSnapshot
+    fun signIn()
+    fun startLocalPlayback()
+    fun refresh()
+    fun search(query: String)
+    fun openPlaylist(id: String)
+    fun openContent(kind: String, id: String)
+    fun command(action: String, value: String = "")
+    fun play(track: LiveTrack)
+    fun playInContext(track: LiveTrack, contextUri: String)
+    fun playUri(uri: String)
+    fun queue(track: LiveTrack)
+    fun updateSettings(settings: MobileSettings)
+    fun createPlaylist(name: String)
+    fun addToPlaylist(playlistId: String, uri: String)
+    fun removeFromPlaylist(playlistId: String, uri: String)
+    fun signOut()
+}
+
+class LiveViewModel(application: Application) : AndroidViewModel(application), LiveUiController {
+    override var snapshot by mutableStateOf(LiveSnapshot())
         private set
 
     private var initialized = false
     private var serviceRunning = false
+    @Volatile private var localSignInRequested = false
     @Volatile private var pendingUri: String? = null
+    @Volatile private var pendingPlaybackUri: String? = null
+    @Volatile private var pendingTrack: LiveTrack? = null
+    @Volatile private var pendingTrackContext: String? = null
 
     init {
         viewModelScope.launch(Dispatchers.IO) {
@@ -39,9 +63,23 @@ class LiveViewModel(application: Application) : AndroidViewModel(application) {
                             updatePlaybackService(next)
                             if (next.authState == rocks.fastpotify.android.model.AuthState.SignedIn) {
                                 pendingUri?.let { uri ->
-                                    spotifyUri(uri)?.let { NativeBridge.command("play_uri", it) }
+                                    spotifyUri(uri)?.let(::playUri)
                                     pendingUri = null
                                 }
+                            }
+                            if (next.localPlayback == LocalPlaybackState.Connected) {
+                                localSignInRequested = false
+                                pendingTrack?.let { track ->
+                                    pendingTrackContext?.let { context ->
+                                        NativeBridge.playContext(track.toJson(), context)
+                                    } ?: NativeBridge.playTrack(track.toJson())
+                                }
+                                pendingTrack = null
+                                pendingTrackContext = null
+                                pendingPlaybackUri?.let { NativeBridge.command("play_uri", it) }
+                                pendingPlaybackUri = null
+                            } else if (next.localPlayback == LocalPlaybackState.SignedOut && next.localError != null) {
+                                localSignInRequested = false
                             }
                             withContext(Dispatchers.Main.immediate) { snapshot = next }
                         }
@@ -51,46 +89,82 @@ class LiveViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    fun signIn() {
-        openAuthorization { NativeBridge.startSignIn() }
+    override fun signIn() {
+        openAuthorization(urlProvider = { NativeBridge.startSignIn() })
     }
 
-    fun startLocalPlayback() {
-        openAuthorization { NativeBridge.startLocalSignIn() }
+    override fun startLocalPlayback() {
+        if (snapshot.localPlayback != LocalPlaybackState.SignedOut || localSignInRequested) return
+        localSignInRequested = true
+        openAuthorization(
+            urlProvider = { NativeBridge.startLocalSignIn() },
+            onFailure = { localSignInRequested = false },
+        )
     }
 
-    private fun openAuthorization(urlProvider: () -> String) {
+    private fun openAuthorization(urlProvider: () -> String, onFailure: () -> Unit = {}) {
         viewModelScope.launch(Dispatchers.IO) {
             runCatching(urlProvider).onSuccess { url ->
                 val intent = Intent(Intent.ACTION_VIEW, Uri.parse(url)).apply {
                     addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
                 }
                 getApplication<Application>().startActivity(intent)
-            }
+            }.onFailure { onFailure() }
         }
     }
 
-    fun refresh() = NativeBridge.refresh()
+    override fun refresh() = NativeBridge.refresh()
 
-    fun search(query: String) = NativeBridge.search(query.trim())
+    override fun search(query: String) = NativeBridge.search(query.trim())
 
-    fun openPlaylist(id: String) = NativeBridge.openPlaylist(id)
+    override fun openPlaylist(id: String) = NativeBridge.openPlaylist(id)
 
-    fun openContent(kind: String, id: String) = NativeBridge.openContent(kind, id)
+    override fun openContent(kind: String, id: String) = NativeBridge.openContent(kind, id)
 
-    fun command(action: String, value: String = "") = NativeBridge.command(action, value)
+    override fun command(action: String, value: String) = NativeBridge.command(action, value)
 
-    fun play(track: LiveTrack) = NativeBridge.playTrack(track.toJson())
+    override fun play(track: LiveTrack) {
+        if (hasPlaybackTarget()) {
+            NativeBridge.playTrack(track.toJson())
+        } else {
+            pendingPlaybackUri = null
+            pendingTrackContext = null
+            pendingTrack = track
+            startLocalPlayback()
+        }
+    }
 
-    fun queue(track: LiveTrack) = NativeBridge.queueTrack(track.toJson())
+    override fun playInContext(track: LiveTrack, contextUri: String) {
+        if (hasPlaybackTarget()) {
+            NativeBridge.playContext(track.toJson(), contextUri)
+        } else {
+            pendingPlaybackUri = null
+            pendingTrack = track
+            pendingTrackContext = contextUri
+            startLocalPlayback()
+        }
+    }
 
-    fun updateSettings(settings: MobileSettings) = NativeBridge.updateSettings(settings.toJson())
+    override fun playUri(uri: String) {
+        if (hasPlaybackTarget()) {
+            NativeBridge.command("play_uri", uri)
+        } else {
+            pendingTrack = null
+            pendingTrackContext = null
+            pendingPlaybackUri = uri
+            startLocalPlayback()
+        }
+    }
 
-    fun createPlaylist(name: String) = NativeBridge.createPlaylist(name.trim())
+    override fun queue(track: LiveTrack) = NativeBridge.queueTrack(track.toJson())
 
-    fun addToPlaylist(playlistId: String, uri: String) = NativeBridge.addToPlaylist(playlistId, uri)
+    override fun updateSettings(settings: MobileSettings) = NativeBridge.updateSettings(settings.toJson())
 
-    fun removeFromPlaylist(playlistId: String, uri: String) = NativeBridge.removeFromPlaylist(playlistId, uri)
+    override fun createPlaylist(name: String) = NativeBridge.createPlaylist(name.trim())
+
+    override fun addToPlaylist(playlistId: String, uri: String) = NativeBridge.addToPlaylist(playlistId, uri)
+
+    override fun removeFromPlaylist(playlistId: String, uri: String) = NativeBridge.removeFromPlaylist(playlistId, uri)
 
     fun openExternalUri(uri: String) { pendingUri = uri }
 
@@ -103,7 +177,10 @@ class LiveViewModel(application: Application) : AndroidViewModel(application) {
         return if (index >= 0 && index + 1 < parts.size) "spotify:${parts[index]}:${parts[index + 1]}" else null
     }
 
-    fun signOut() = NativeBridge.signOut()
+    override fun signOut() = NativeBridge.signOut()
+
+    private fun hasPlaybackTarget(): Boolean =
+        snapshot.localPlayback == LocalPlaybackState.Connected || snapshot.devices.any { it.active }
 
     private fun updatePlaybackService(next: LiveSnapshot) {
         val shouldRun = next.localPlayback == LocalPlaybackState.Connected
@@ -118,6 +195,6 @@ class LiveViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     companion object {
-        private const val POLL_INTERVAL_MS = 500L
+        private const val POLL_INTERVAL_MS = 1_000L
     }
 }

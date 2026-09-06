@@ -36,7 +36,10 @@ pub struct LiveSnapshot {
     pub playlists: Vec<LiveCard>,
     pub saved_tracks: Vec<LiveTrack>,
     pub library_items: Vec<LiveCard>,
+    pub made_for_you: Vec<LiveCard>,
+    pub top_artists: Vec<LiveCard>,
     pub top_tracks: Vec<LiveTrack>,
+    pub recommendations: Vec<LiveTrack>,
     pub recent_tracks: Vec<LiveTrack>,
     pub search_query: String,
     pub search_results: Vec<LiveCard>,
@@ -549,22 +552,10 @@ impl MobileClient {
                 "repeat" => Some(PlayerCommand::Repeat(RepeatMode::from_api(&value))),
                 "queue" => Some(PlayerCommand::AddToQueue(value.clone())),
                 "clear_queue" => Some(PlayerCommand::ClearQueue),
-                "play_uri" => Some(PlayerCommand::Load(
-                    if value.starts_with("spotify:track:") || value.starts_with("spotify:episode:")
-                    {
-                        LoadSpec {
-                            uris: vec![value.clone()],
-                            play: true,
-                            ..LoadSpec::default()
-                        }
-                    } else {
-                        LoadSpec {
-                            context_uri: Some(value.clone()),
-                            play: true,
-                            ..LoadSpec::default()
-                        }
-                    },
-                )),
+                "play_uri" => Some(PlayerCommand::Load(load_spec_for_uri(&value))),
+                "play_context" => value.split_once('\n').map(|(context, offset)| {
+                    PlayerCommand::Load(load_spec_for_context(context, offset))
+                }),
                 _ => None,
             };
             let result = if command.is_none() && matches!(action.as_str(), "play" | "pause") {
@@ -621,6 +612,16 @@ impl MobileClient {
                     };
                     api.play(None, Some(&request)).await
                 }
+                "play_context" => match value.split_once('\n') {
+                    Some((context, offset)) => {
+                        let request = PlayRequest::context(context.to_string())
+                            .starting_at_uri(offset.to_string());
+                        api.play(None, Some(&request)).await
+                    }
+                    None => Err(crate::api::client::ApiError::Decode(
+                        "invalid playback context".into(),
+                    )),
+                },
                 _ => Err(crate::api::client::ApiError::Decode(format!(
                     "unknown action {action}"
                 ))),
@@ -639,30 +640,26 @@ impl MobileClient {
     pub fn play_track(&self, track: LiveTrack) {
         {
             let mut state = lock(&self.state);
-            state.snapshot.now_playing = Some(LiveNowPlaying {
-                track: track.clone(),
-                position_ms: 0,
-                playing: true,
-                shuffled: state
-                    .snapshot
-                    .now_playing
-                    .as_ref()
-                    .is_some_and(|now| now.shuffled),
-                repeat: state
-                    .snapshot
-                    .now_playing
-                    .as_ref()
-                    .map(|now| now.repeat.clone())
-                    .unwrap_or_else(|| "off".into()),
-                device_id: state
-                    .snapshot
-                    .now_playing
-                    .as_ref()
-                    .and_then(|now| now.device_id.clone()),
-            });
+            let now_playing =
+                optimistic_now_playing(track.clone(), state.snapshot.now_playing.as_ref());
+            state.snapshot.now_playing = Some(now_playing);
             bump(&mut state.snapshot);
         }
         self.command("play_uri".into(), track.uri);
+    }
+
+    pub fn play_context(&self, track: LiveTrack, context_uri: String) {
+        let offset_uri = track.uri.clone();
+        {
+            let mut state = lock(&self.state);
+            let now_playing = optimistic_now_playing(track, state.snapshot.now_playing.as_ref());
+            state.snapshot.now_playing = Some(now_playing);
+            bump(&mut state.snapshot);
+        }
+        self.command(
+            "play_context".into(),
+            format!("{context_uri}\n{offset_uri}"),
+        );
     }
 
     pub fn queue_track(&self, track: LiveTrack) {
@@ -818,7 +815,10 @@ struct DashboardData {
     playlists: Vec<LiveCard>,
     saved_tracks: Vec<LiveTrack>,
     library_items: Vec<LiveCard>,
+    made_for_you: Vec<LiveCard>,
+    top_artists: Vec<LiveCard>,
     top_tracks: Vec<LiveTrack>,
+    recommendations: Vec<LiveTrack>,
     recent_tracks: Vec<LiveTrack>,
     now_playing: Option<LiveNowPlaying>,
     queue: Vec<LiveTrack>,
@@ -827,7 +827,24 @@ struct DashboardData {
 
 async fn fetch_dashboard(api: &Arc<ApiClient>) -> std::result::Result<DashboardData, String> {
     let user = api.me().await.map_err(|error| error.to_string())?;
-    let (playlists, saved, albums, artists, shows, episodes, top, recent, playback, queue, devices) = tokio::join!(
+    let (
+        playlists,
+        saved,
+        albums,
+        artists,
+        shows,
+        episodes,
+        top,
+        top_artists,
+        recent,
+        playback,
+        queue,
+        devices,
+        discover_weekly,
+        release_radar,
+        daily_mix,
+        daylist,
+    ) = tokio::join!(
         api.my_playlists(0, 50),
         api.saved_tracks(0, 50),
         api.saved_albums(0, 50),
@@ -835,11 +852,29 @@ async fn fetch_dashboard(api: &Arc<ApiClient>) -> std::result::Result<DashboardD
         api.saved_shows(0, 50),
         api.saved_episodes(0, 50),
         api.top_tracks("medium_term", 20, 0),
+        api.top_artists("medium_term", 20),
         api.recently_played(30, None, None),
         api.playback_state(),
         api.queue(),
         api.devices(),
+        api.search("Discover Weekly", &["playlist"]),
+        api.search("Release Radar", &["playlist"]),
+        api.search("Daily Mix", &["playlist"]),
+        api.search("daylist", &["playlist"]),
     );
+    let top_tracks = top.unwrap_or_default().items;
+    let seed_tracks: Vec<String> = top_tracks
+        .iter()
+        .filter_map(|track| track.id.clone())
+        .take(5)
+        .collect();
+    let recommendations = if seed_tracks.is_empty() {
+        Vec::new()
+    } else {
+        api.recommendations(&seed_tracks, &[], 20)
+            .await
+            .unwrap_or_default()
+    };
     let mut library_items = Vec::new();
     library_items.extend(
         albums
@@ -885,12 +920,20 @@ async fn fetch_dashboard(api: &Arc<ApiClient>) -> std::result::Result<DashboardD
             .map(|saved| map_track(&saved.track))
             .collect(),
         library_items,
-        top_tracks: top
+        made_for_you: made_for_you([
+            ("Discover Weekly", discover_weekly.ok()),
+            ("Release Radar", release_radar.ok()),
+            ("Daily Mix", daily_mix.ok()),
+            ("daylist", daylist.ok()),
+        ]),
+        top_artists: top_artists
             .unwrap_or_default()
             .items
             .iter()
-            .map(map_track)
+            .map(map_artist)
             .collect(),
+        top_tracks: top_tracks.iter().map(map_track).collect(),
+        recommendations: recommendations.iter().map(map_track).collect(),
         recent_tracks: recent
             .unwrap_or_default()
             .items
@@ -913,7 +956,10 @@ fn apply_dashboard(snapshot: &mut LiveSnapshot, data: DashboardData) {
     snapshot.playlists = data.playlists;
     snapshot.saved_tracks = data.saved_tracks;
     snapshot.library_items = data.library_items;
+    snapshot.made_for_you = data.made_for_you;
+    snapshot.top_artists = data.top_artists;
     snapshot.top_tracks = data.top_tracks;
+    snapshot.recommendations = data.recommendations;
     snapshot.recent_tracks = data.recent_tracks;
     snapshot.now_playing = data.now_playing;
     snapshot.queue = data.queue;
@@ -1180,6 +1226,69 @@ fn map_device(device: &Device) -> LiveDevice {
     }
 }
 
+fn load_spec_for_uri(uri: &str) -> LoadSpec {
+    // Spotify resolves a single item as a context. This is the same path the
+    // desktop client uses and lets librespot continue with radio/autoplay.
+    LoadSpec {
+        context_uri: Some(uri.to_string()),
+        play: true,
+        ..LoadSpec::default()
+    }
+}
+
+fn optimistic_now_playing(track: LiveTrack, previous: Option<&LiveNowPlaying>) -> LiveNowPlaying {
+    LiveNowPlaying {
+        track,
+        position_ms: 0,
+        playing: true,
+        shuffled: previous.is_some_and(|now| now.shuffled),
+        repeat: previous
+            .map(|now| now.repeat.clone())
+            .unwrap_or_else(|| "off".into()),
+        device_id: previous.and_then(|now| now.device_id.clone()),
+    }
+}
+
+fn load_spec_for_context(context_uri: &str, offset_uri: &str) -> LoadSpec {
+    LoadSpec {
+        context_uri: Some(context_uri.to_string()),
+        offset_uri: Some(offset_uri.to_string()),
+        play: true,
+        ..LoadSpec::default()
+    }
+}
+
+fn made_for_you<const N: usize>(searches: [(&str, Option<SearchResults>); N]) -> Vec<LiveCard> {
+    let mut cards = Vec::new();
+    let mut seen = std::collections::HashSet::new();
+    for (term, results) in searches {
+        let Some(playlists) = results.and_then(|results| results.playlists) else {
+            continue;
+        };
+        for playlist in playlists.items {
+            let owner = playlist.owner.id.as_deref().unwrap_or_default();
+            let key = playlist.name.trim().to_lowercase();
+            if is_made_for_you(&playlist.name, term)
+                && (owner == "spotify" || playlist.owner_name() == "Spotify")
+                && seen.insert(key)
+            {
+                cards.push(map_playlist(&playlist));
+            }
+        }
+    }
+    cards
+}
+
+fn is_made_for_you(name: &str, term: &str) -> bool {
+    let name = name.trim().to_lowercase();
+    let term = term.to_lowercase();
+    name == term
+        || (term == "daily mix"
+            && name.strip_prefix("daily mix ").is_some_and(|number| {
+                !number.is_empty() && number.chars().all(|character| character.is_ascii_digit())
+            }))
+}
+
 fn map_search(results: SearchResults) -> Vec<LiveCard> {
     let mut cards = Vec::new();
     if let Some(page) = results.tracks {
@@ -1327,5 +1436,41 @@ mod tests {
             mapped.image_url.as_deref(),
             Some("https://i.scdn.co/image/album")
         );
+    }
+
+    #[test]
+    fn a_single_track_uses_spotifys_context_resolver() {
+        let spec = load_spec_for_uri("spotify:track:abc");
+        assert_eq!(spec.context_uri.as_deref(), Some("spotify:track:abc"));
+        assert!(spec.uris.is_empty());
+        assert!(spec.play);
+
+        let playlist = load_spec_for_context("spotify:playlist:playlist", "spotify:track:abc");
+        assert_eq!(
+            playlist.context_uri.as_deref(),
+            Some("spotify:playlist:playlist")
+        );
+        assert_eq!(playlist.offset_uri.as_deref(), Some("spotify:track:abc"));
+    }
+
+    #[test]
+    fn made_for_you_keeps_spotify_mixes_and_removes_duplicates() {
+        let discover: SearchResults = serde_json::from_str(
+            r#"{"playlists":{"items":[{"id":"discover","uri":"spotify:playlist:discover","name":"Discover Weekly","owner":{"id":"spotify","display_name":"Spotify"}},{"id":"copy","uri":"spotify:playlist:copy","name":"Discover Weekly","owner":{"id":"someone","display_name":"Someone"}}],"total":2}}"#,
+        )
+        .unwrap();
+        let daily: SearchResults = serde_json::from_str(
+            r#"{"playlists":{"items":[{"id":"daily-1","uri":"spotify:playlist:daily-1","name":"Daily Mix 1","owner":{"id":"spotify","display_name":"Spotify"}},{"id":"not-a-mix","uri":"spotify:playlist:other","name":"Daily Mix Party","owner":{"id":"spotify","display_name":"Spotify"}}],"total":2}}"#,
+        )
+        .unwrap();
+
+        let cards = made_for_you([
+            ("Discover Weekly", Some(discover)),
+            ("Daily Mix", Some(daily)),
+        ]);
+
+        assert_eq!(cards.len(), 2);
+        assert_eq!(cards[0].title, "Discover Weekly");
+        assert_eq!(cards[1].title, "Daily Mix 1");
     }
 }

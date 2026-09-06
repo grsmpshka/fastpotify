@@ -1,10 +1,10 @@
 package rocks.fastpotify.android.ui.live
 
 import android.Manifest
-import android.app.Activity
-import android.content.Context
 import android.content.pm.PackageManager
 import android.os.Build
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -24,7 +24,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
-import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardActions
@@ -78,6 +78,7 @@ import androidx.compose.material3.Switch
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -90,7 +91,6 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.platform.LocalContext
-import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.testTag
@@ -100,7 +100,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
-import rocks.fastpotify.android.LiveViewModel
+import rocks.fastpotify.android.LiveUiController
 import rocks.fastpotify.android.model.AuthState
 import rocks.fastpotify.android.model.LiveCard
 import rocks.fastpotify.android.model.LiveDevice
@@ -125,12 +125,26 @@ private enum class Overlay { Queue, Devices, Settings, CreatePlaylist }
 
 @Composable
 fun LiveFastpotifyApp(
-    viewModel: LiveViewModel,
+    viewModel: LiveUiController,
     profile: UiProfile,
     onProfileSelected: (UiProfile) -> Unit,
     onCheckForUpdates: () -> Unit,
+    requestNotificationPermission: Boolean = true,
 ) {
     val snapshot = viewModel.snapshot
+    val context = LocalContext.current
+    val notificationPermission = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestPermission(),
+    ) {}
+    LaunchedEffect(snapshot.localPlayback) {
+        if (requestNotificationPermission &&
+            snapshot.localPlayback == LocalPlaybackState.Connected &&
+            Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
+            ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
+        ) {
+            notificationPermission.launch(Manifest.permission.POST_NOTIFICATIONS)
+        }
+    }
     when (snapshot.authState) {
         AuthState.SignedOut, AuthState.SigningIn -> LoginScreen(snapshot, viewModel::signIn)
         AuthState.SignedIn -> BoxWithConstraints(Modifier.fillMaxSize()) {
@@ -191,12 +205,11 @@ private fun LoginScreen(snapshot: LiveSnapshot, signIn: () -> Unit) {
 @Composable
 private fun CarShell(
     snapshot: LiveSnapshot,
-    viewModel: LiveViewModel,
+    viewModel: LiveUiController,
     profile: UiProfile,
     onProfileSelected: (UiProfile) -> Unit,
     onCheckForUpdates: () -> Unit,
 ) {
-    val context = LocalContext.current
     var screen by remember { mutableStateOf(LiveScreen.Home) }
     var overlay by remember { mutableStateOf<Overlay?>(null) }
     Row(Modifier.fillMaxSize().background(Background).semantics { testTag = "live-screen-ready" }) {
@@ -210,7 +223,7 @@ private fun CarShell(
             },
         )
         Column(Modifier.weight(1f).fillMaxHeight()) {
-            LiveTopBar(snapshot, profile, onProfileSelected, onCheckForUpdates, viewModel::refresh, { startLocalPlayback(context, viewModel) }, { overlay = Overlay.Settings }, { overlay = Overlay.CreatePlaylist }, viewModel::signOut, compact = false)
+            LiveTopBar(snapshot, profile, onProfileSelected, onCheckForUpdates, viewModel::refresh, viewModel::startLocalPlayback, { overlay = Overlay.Settings }, { overlay = Overlay.CreatePlaylist }, viewModel::signOut, compact = false)
             Box(Modifier.weight(1f)) {
                 ScreenContent(snapshot, screen, viewModel, { screen = it }, wide = true)
             }
@@ -247,7 +260,7 @@ private fun CarSidebar(
             }
             Text("Плейлисты", fontWeight = FontWeight.Bold, modifier = Modifier.padding(12.dp))
             LazyColumn(verticalArrangement = Arrangement.spacedBy(5.dp)) {
-                items(snapshot.playlists, key = { it.id }) { card ->
+                itemsIndexed(snapshot.playlists, key = { index, card -> "sidebar-$index-${card.id}" }) { _, card ->
                     CompactCard(card, Modifier.fillMaxWidth()) { onPlaylist(card) }
                 }
             }
@@ -259,19 +272,18 @@ private fun CarSidebar(
 @Composable
 private fun PhoneShell(
     snapshot: LiveSnapshot,
-    viewModel: LiveViewModel,
+    viewModel: LiveUiController,
     profile: UiProfile,
     onProfileSelected: (UiProfile) -> Unit,
     onCheckForUpdates: () -> Unit,
 ) {
-    val context = LocalContext.current
     var screen by remember { mutableStateOf(LiveScreen.Home) }
     var overlay by remember { mutableStateOf<Overlay?>(null) }
     Scaffold(
         modifier = Modifier.semantics { testTag = "live-screen-ready" },
         containerColor = Background,
         topBar = {
-            LiveTopBar(snapshot, profile, onProfileSelected, onCheckForUpdates, viewModel::refresh, { startLocalPlayback(context, viewModel) }, { overlay = Overlay.Settings }, { overlay = Overlay.CreatePlaylist }, viewModel::signOut, compact = true)
+            LiveTopBar(snapshot, profile, onProfileSelected, onCheckForUpdates, viewModel::refresh, viewModel::startLocalPlayback, { overlay = Overlay.Settings }, { overlay = Overlay.CreatePlaylist }, viewModel::signOut, compact = true)
         },
         bottomBar = {
             Column {
@@ -365,7 +377,7 @@ private fun LiveTopBar(
 private fun ScreenContent(
     snapshot: LiveSnapshot,
     screen: LiveScreen,
-    viewModel: LiveViewModel,
+    viewModel: LiveUiController,
     navigate: (LiveScreen) -> Unit,
     wide: Boolean,
 ) {
@@ -381,7 +393,7 @@ private fun ScreenContent(
 @Composable
 private fun HomeScreen(
     snapshot: LiveSnapshot,
-    viewModel: LiveViewModel,
+    viewModel: LiveUiController,
     navigate: (LiveScreen) -> Unit,
     wide: Boolean,
 ) {
@@ -392,7 +404,7 @@ private fun HomeScreen(
         else -> snapshot.playlists + snapshot.libraryItems.filter { it.kind == "show" }.take(2)
     }
     LazyColumn(
-        Modifier.fillMaxSize(),
+        Modifier.fillMaxSize().semantics { testTag = "home-list" },
         contentPadding = PaddingValues(20.dp),
         verticalArrangement = Arrangement.spacedBy(18.dp),
     ) {
@@ -404,12 +416,17 @@ private fun HomeScreen(
                 }
             }
         }
+        if (snapshot.localPlayback != LocalPlaybackState.Connected && snapshot.devices.none { it.active }) {
+            item { PlaybackSetupCard(snapshot, viewModel) }
+        }
+        snapshot.localError?.let { error -> item { ErrorCard(error) } }
+        snapshot.error?.let { error -> item { ErrorCard(error) } }
         item {
             LazyRow(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                 if (filter != "Подкасты") {
                     item { LikedSongsMediaCard(Modifier.width(if (wide) 190.dp else 168.dp)) { navigate(LiveScreen.Library) } }
                 }
-                items(quickCards.take(8), key = { "quick-${it.kind}-${it.id}" }) { card ->
+                itemsIndexed(quickCards.take(8), key = { index, card -> "quick-$index-${card.kind}-${card.id}" }) { _, card ->
                     MediaCard(card, Modifier.width(if (wide) 190.dp else 168.dp)) {
                         viewModel.openContent(card.kind, card.id)
                         navigate(LiveScreen.Playlist)
@@ -417,23 +434,74 @@ private fun HomeScreen(
                 }
             }
         }
-        snapshot.topTracks.firstOrNull()?.let { featured ->
+        if (snapshot.madeForYou.isNotEmpty()) {
             item { SectionTitle("Специально для тебя") }
-            item { FeaturedTrack(featured, wide) { viewModel.play(featured) } }
+            item {
+                LazyRow(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    itemsIndexed(
+                        snapshot.madeForYou,
+                        key = { index, card -> "made-$index-${card.id}" },
+                    ) { _, card ->
+                        MediaCard(card, Modifier.width(if (wide) 210.dp else 172.dp)) {
+                            viewModel.openContent(card.kind, card.id)
+                            navigate(LiveScreen.Playlist)
+                        }
+                    }
+                }
+            }
         }
-        if (snapshot.recentTracks.isNotEmpty()) {
+        val recent = snapshot.recentTracks.distinctBy { it.uri }.take(16)
+        if (recent.isNotEmpty()) {
             item { SectionTitle("Недавно прослушано") }
-            items(snapshot.recentTracks, key = { "recent-${it.id}-${it.uri}" }) { track ->
-                TrackRow(track, { viewModel.play(track) }, viewModel, snapshot.playlists)
+            item {
+                LazyRow(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    itemsIndexed(recent, key = { index, track -> "recent-$index-${track.uri}" }) { _, track ->
+                        TrackMediaCard(track, Modifier.width(if (wide) 190.dp else 164.dp)) { viewModel.play(track) }
+                    }
+                }
+            }
+        }
+        if (snapshot.topArtists.isNotEmpty()) {
+            item { SectionTitle("Ваши любимые исполнители") }
+            item {
+                LazyRow(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    itemsIndexed(snapshot.topArtists, key = { index, card -> "artist-$index-${card.id}" }) { _, card ->
+                        MediaCard(card, Modifier.width(if (wide) 190.dp else 164.dp)) {
+                            viewModel.openContent(card.kind, card.id)
+                            navigate(LiveScreen.Playlist)
+                        }
+                    }
+                }
             }
         }
         if (snapshot.topTracks.isNotEmpty()) {
             item { SectionTitle("Часто слушаете") }
-            items(snapshot.topTracks, key = { "top-${it.id}-${it.uri}" }) { track ->
-                TrackRow(track, { viewModel.play(track) }, viewModel, snapshot.playlists)
+            item {
+                LazyRow(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    itemsIndexed(snapshot.topTracks, key = { index, track -> "top-$index-${track.uri}" }) { _, track ->
+                        TrackMediaCard(track, Modifier.width(if (wide) 190.dp else 164.dp)) { viewModel.play(track) }
+                    }
+                }
             }
         }
-        snapshot.error?.let { error -> item { ErrorCard(error) } }
+        if (snapshot.recommendations.isNotEmpty()) {
+            item { SectionTitle("Рекомендуем для вас") }
+            item {
+                LazyRow(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    itemsIndexed(
+                        snapshot.recommendations,
+                        key = { index, track -> "recommended-$index-${track.uri}" },
+                    ) { _, track ->
+                        TrackMediaCard(track, Modifier.width(if (wide) 190.dp else 164.dp)) { viewModel.play(track) }
+                    }
+                }
+            }
+        }
+        if (snapshot.madeForYou.isEmpty()) {
+            snapshot.topTracks.firstOrNull()?.let { featured ->
+                item { FeaturedTrack(featured, wide) { viewModel.play(featured) } }
+            }
+        }
     }
 }
 
@@ -470,7 +538,7 @@ private fun FeaturedTrackText(track: LiveTrack, play: () -> Unit, modifier: Modi
 @Composable
 private fun SearchScreen(
     snapshot: LiveSnapshot,
-    viewModel: LiveViewModel,
+    viewModel: LiveUiController,
     navigate: (LiveScreen) -> Unit,
 ) {
     var query by remember(snapshot.searchQuery) { mutableStateOf(snapshot.searchQuery) }
@@ -495,13 +563,13 @@ private fun SearchScreen(
                 }),
             )
         }
-        items(snapshot.searchResults, key = { "search-${it.kind}-${it.id}" }) { card ->
+        itemsIndexed(snapshot.searchResults, key = { index, card -> "search-$index-${card.kind}-${card.id}" }) { _, card ->
             CompactCard(card, Modifier.fillMaxWidth()) {
                 if (card.kind in setOf("playlist", "album", "artist", "show")) {
                     viewModel.openContent(card.kind, card.id)
                     navigate(LiveScreen.Playlist)
                 } else {
-                    viewModel.command("play_uri", card.uri)
+                    viewModel.playUri(card.uri)
                 }
             }
         }
@@ -511,9 +579,10 @@ private fun SearchScreen(
 @Composable
 private fun LibraryScreen(
     snapshot: LiveSnapshot,
-    viewModel: LiveViewModel,
+    viewModel: LiveUiController,
     navigate: (LiveScreen) -> Unit,
 ) {
+    val likedSongsUri = snapshot.user?.id?.let { "spotify:user:$it:collection" }
     LazyColumn(
         Modifier.fillMaxSize(),
         contentPadding = PaddingValues(20.dp),
@@ -524,11 +593,16 @@ private fun LibraryScreen(
             Spacer(Modifier.height(10.dp))
             SectionTitle("Любимые треки")
         }
-        items(snapshot.savedTracks, key = { "saved-${it.id}" }) { track ->
-            TrackRow(track, { viewModel.play(track) }, viewModel, snapshot.playlists)
+        itemsIndexed(snapshot.savedTracks, key = { index, track -> "saved-$index-${track.id}" }) { _, track ->
+            TrackRow(
+                track,
+                { viewModel.playInContext(track, likedSongsUri ?: track.uri) },
+                viewModel,
+                snapshot.playlists,
+            )
         }
         item { SectionTitle("Плейлисты") }
-        items(snapshot.playlists, key = { "library-${it.id}" }) { card ->
+        itemsIndexed(snapshot.playlists, key = { index, card -> "library-playlist-$index-${card.id}" }) { _, card ->
             CompactCard(card, Modifier.fillMaxWidth()) {
                 viewModel.openPlaylist(card.id)
                 navigate(LiveScreen.Playlist)
@@ -536,10 +610,10 @@ private fun LibraryScreen(
         }
         if (snapshot.libraryItems.isNotEmpty()) {
             item { SectionTitle("Альбомы, исполнители и подкасты") }
-            items(snapshot.libraryItems, key = { "library-${it.kind}-${it.id}" }) { card ->
+            itemsIndexed(snapshot.libraryItems, key = { index, card -> "library-$index-${card.kind}-${card.id}" }) { _, card ->
                 CompactCard(card, Modifier.fillMaxWidth()) {
                     if (card.kind == "episode") {
-                        viewModel.command("play_uri", card.uri)
+                        viewModel.playUri(card.uri)
                     } else {
                         viewModel.openContent(card.kind, card.id)
                         navigate(LiveScreen.Playlist)
@@ -592,7 +666,7 @@ private fun LikedSongsArtwork(modifier: Modifier) {
 private fun PlaylistScreen(
     playlist: LivePlaylist?,
     playlists: List<LiveCard>,
-    viewModel: LiveViewModel,
+    viewModel: LiveUiController,
     navigate: (LiveScreen) -> Unit,
     wide: Boolean,
 ) {
@@ -621,20 +695,26 @@ private fun PlaylistScreen(
                 }
             }
         }
-        items(playlist.tracks, key = { "playlist-${it.id}-${it.uri}" }) { track ->
-            TrackRow(track, { viewModel.play(track) }, viewModel, playlists, playlist.id)
+        itemsIndexed(playlist.tracks, key = { index, track -> "playlist-$index-${track.id}-${track.uri}" }) { _, track ->
+            TrackRow(
+                track,
+                { viewModel.playInContext(track, playlist.uri) },
+                viewModel,
+                playlists,
+                playlist.id,
+            )
         }
     }
 }
 
 @Composable
-private fun CollectionText(playlist: LivePlaylist, viewModel: LiveViewModel, modifier: Modifier) {
+private fun CollectionText(playlist: LivePlaylist, viewModel: LiveUiController, modifier: Modifier) {
     Column(modifier) {
         Text("КОЛЛЕКЦИЯ", color = Accent, fontWeight = FontWeight.Bold)
         Text(playlist.title, fontSize = 30.sp, fontWeight = FontWeight.Black)
         if (playlist.description.isNotBlank()) Text(playlist.description, color = TextSecondary, maxLines = 3)
         Text("${playlist.owner} · ${playlist.total}", color = TextSecondary)
-        Button(onClick = { viewModel.command("play_uri", playlist.uri) }) {
+        Button(onClick = { viewModel.playUri(playlist.uri) }) {
             Icon(Icons.Default.PlayArrow, null)
             Text("Воспроизвести")
         }
@@ -648,6 +728,27 @@ private fun MediaCard(card: LiveCard, modifier: Modifier, onClick: () -> Unit) {
         Spacer(Modifier.height(8.dp))
         Text(card.title, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
         Text(card.subtitle, color = TextSecondary, maxLines = 2, overflow = TextOverflow.Ellipsis)
+    }
+}
+
+@Composable
+private fun TrackMediaCard(track: LiveTrack, modifier: Modifier, onClick: () -> Unit) {
+    Column(modifier.clip(RoundedCornerShape(10.dp)).clickable(onClick = onClick).padding(8.dp)) {
+        Box {
+            LiveArtwork(track.imageUrl, track.title, Modifier.fillMaxWidth().aspectRatio(1f))
+            Surface(
+                modifier = Modifier.align(Alignment.BottomEnd).padding(8.dp).size(44.dp),
+                shape = CircleShape,
+                color = Accent,
+            ) {
+                Box(contentAlignment = Alignment.Center) {
+                    Icon(Icons.Default.PlayArrow, "Воспроизвести", tint = Background)
+                }
+            }
+        }
+        Spacer(Modifier.height(8.dp))
+        Text(track.title, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        Text(track.artist, color = TextSecondary, maxLines = 2, overflow = TextOverflow.Ellipsis)
     }
 }
 
@@ -670,7 +771,7 @@ private fun CompactCard(card: LiveCard, modifier: Modifier, onClick: () -> Unit)
 private fun TrackRow(
     track: LiveTrack,
     onClick: () -> Unit,
-    viewModel: LiveViewModel? = null,
+    viewModel: LiveUiController? = null,
     playlists: List<LiveCard> = emptyList(),
     removableFrom: String? = null,
 ) {
@@ -717,10 +818,11 @@ private fun TrackRow(
 }
 
 @Composable
-private fun MiniPlayer(now: LiveNowPlaying, viewModel: LiveViewModel, open: () -> Unit) {
+private fun MiniPlayer(now: LiveNowPlaying, viewModel: LiveUiController, open: () -> Unit) {
     Row(
         Modifier.fillMaxWidth().height(68.dp).padding(horizontal = 8.dp)
-            .clip(RoundedCornerShape(10.dp)).background(SurfaceRaised).clickable(onClick = open).padding(7.dp),
+            .clip(RoundedCornerShape(10.dp)).background(SurfaceRaised).clickable(onClick = open).padding(7.dp)
+            .semantics { testTag = "mini-player" },
         verticalAlignment = Alignment.CenterVertically,
     ) {
         LiveArtwork(now.track.imageUrl, now.track.title, Modifier.size(54.dp))
@@ -738,12 +840,11 @@ private fun MiniPlayer(now: LiveNowPlaying, viewModel: LiveViewModel, open: () -
 @Composable
 private fun NowPlayingPanel(
     snapshot: LiveSnapshot,
-    viewModel: LiveViewModel,
+    viewModel: LiveUiController,
     onOverlay: (Overlay) -> Unit,
     large: Boolean,
     onBack: (() -> Unit)? = null,
 ) {
-    val context = LocalContext.current
     val now = snapshot.nowPlaying
     if (now == null) {
         Column(
@@ -766,7 +867,7 @@ private fun NowPlayingPanel(
             )
             if (snapshot.localPlayback == LocalPlaybackState.SignedOut) {
                 Spacer(Modifier.height(18.dp))
-                Button(onClick = { startLocalPlayback(context, viewModel) }) { Text("Включить на этом устройстве") }
+                Button(onClick = viewModel::startLocalPlayback) { Text("Включить на этом устройстве") }
             }
             snapshot.localError?.let {
                 Spacer(Modifier.height(12.dp))
@@ -780,6 +881,10 @@ private fun NowPlayingPanel(
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.spacedBy(14.dp),
     ) {
+        if (snapshot.localPlayback != LocalPlaybackState.Connected && snapshot.devices.none { it.active }) {
+            PlaybackSetupCard(snapshot, viewModel)
+        }
+        snapshot.localError?.let { ErrorCard(it) }
         if (onBack != null) {
             Row(Modifier.fillMaxWidth()) {
                 IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "Назад") }
@@ -804,6 +909,37 @@ private fun NowPlayingPanel(
             }
             IconButton(onClick = { onOverlay(Overlay.Devices) }) { Icon(Icons.Default.Devices, "Устройства") }
             IconButton(onClick = { onOverlay(Overlay.Queue) }) { Icon(Icons.AutoMirrored.Filled.QueueMusic, "Очередь") }
+        }
+    }
+}
+
+@Composable
+private fun PlaybackSetupCard(snapshot: LiveSnapshot, viewModel: LiveUiController) {
+    Surface(color = SurfaceRaised, shape = RoundedCornerShape(12.dp)) {
+        Row(
+            Modifier.fillMaxWidth().padding(14.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            Icon(Icons.Default.Headphones, null, tint = Accent)
+            Column(Modifier.weight(1f)) {
+                Text("Воспроизведение на этом устройстве", fontWeight = FontWeight.Bold)
+                Text(
+                    when (snapshot.localPlayback) {
+                        LocalPlaybackState.SignedOut -> "Нужно один раз разрешить отдельный вход для плеера. После этого выбранный трек запустится автоматически."
+                        LocalPlaybackState.SigningIn -> "Завершите вход в открывшемся окне Spotify."
+                        LocalPlaybackState.Connecting -> "Подключаем аудиодвижок и Spotify Connect…"
+                        LocalPlaybackState.Connected -> "Готово"
+                    },
+                    color = TextSecondary,
+                    fontSize = 12.sp,
+                )
+            }
+            if (snapshot.localPlayback == LocalPlaybackState.SignedOut) {
+                Button(onClick = viewModel::startLocalPlayback) { Text("Подключить") }
+            } else {
+                CircularProgressIndicator(Modifier.size(24.dp))
+            }
         }
     }
 }
@@ -841,7 +977,7 @@ private fun PlaybackSlider(now: LiveNowPlaying, seek: (Long) -> Unit) {
 }
 
 @Composable
-private fun PlaybackButtons(now: LiveNowPlaying, viewModel: LiveViewModel) {
+private fun PlaybackButtons(now: LiveNowPlaying, viewModel: LiveUiController) {
     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly, verticalAlignment = Alignment.CenterVertically) {
         IconButton(onClick = { viewModel.command("shuffle", (!now.shuffled).toString()) }) {
             Icon(Icons.Default.Shuffle, "Перемешать", tint = if (now.shuffled) Accent else TextSecondary)
@@ -867,14 +1003,14 @@ private fun PlaybackButtons(now: LiveNowPlaying, viewModel: LiveViewModel) {
 private fun OverlayContent(
     overlay: Overlay?,
     snapshot: LiveSnapshot,
-    viewModel: LiveViewModel,
+    viewModel: LiveUiController,
     dismiss: () -> Unit,
 ) {
     when (overlay) {
         Overlay.Queue -> ModalBottomSheet(onDismissRequest = dismiss) {
             Text("Очередь", Modifier.padding(horizontal = 20.dp), fontSize = 24.sp, fontWeight = FontWeight.Bold)
             LazyColumn(Modifier.fillMaxWidth().height(420.dp), contentPadding = PaddingValues(12.dp)) {
-                items(snapshot.queue, key = { "queue-${it.id}-${it.uri}" }) { track ->
+                itemsIndexed(snapshot.queue, key = { index, track -> "queue-$index-${track.id}-${track.uri}" }) { _, track ->
                     TrackRow(track, { viewModel.play(track) }, viewModel, snapshot.playlists)
                 }
             }
@@ -885,7 +1021,7 @@ private fun OverlayContent(
             title = { Text("Устройства Spotify Connect") },
             text = {
                 LazyColumn {
-                    items(snapshot.devices, key = { it.id ?: it.name }) { device ->
+                    itemsIndexed(snapshot.devices, key = { index, device -> "device-$index-${device.id ?: device.name}" }) { _, device ->
                         DeviceRow(device) {
                             device.id?.let { viewModel.command("transfer", it) }
                             dismiss()
@@ -1011,17 +1147,6 @@ private fun ErrorCard(error: String) {
     Surface(color = MaterialTheme.colorScheme.errorContainer, shape = RoundedCornerShape(10.dp)) {
         Text(error, Modifier.padding(14.dp), color = MaterialTheme.colorScheme.onErrorContainer)
     }
-}
-
-private fun startLocalPlayback(context: Context, viewModel: LiveViewModel) {
-    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
-        ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
-    ) {
-        (context as? Activity)?.let {
-            ActivityCompat.requestPermissions(it, arrayOf(Manifest.permission.POST_NOTIFICATIONS), 100)
-        }
-    }
-    viewModel.startLocalPlayback()
 }
 
 private fun formatTime(milliseconds: Long): String {

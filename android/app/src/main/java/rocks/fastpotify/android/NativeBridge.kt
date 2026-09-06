@@ -10,6 +10,10 @@ object NativeBridge {
     @JvmStatic
     external fun contractVersion(): Int
 
+    /** Debug instrumentation only: opens the same Android output used by playback. */
+    @JvmStatic
+    external fun audioProbe(): String
+
     @JvmStatic
     external fun demoSnapshotJson(profile: String, screen: String): String
 
@@ -42,6 +46,9 @@ object NativeBridge {
 
     @JvmStatic
     external fun playTrack(trackJson: String)
+
+    @JvmStatic
+    external fun playContext(trackJson: String, contextUri: String)
 
     @JvmStatic
     external fun queueTrack(trackJson: String)

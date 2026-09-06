@@ -182,7 +182,11 @@ class PlaybackService : Service() {
         artwork = null
         if (url == null) return
         serviceScope.launch {
-            val request = ImageRequest.Builder(this@PlaybackService).data(url).allowHardware(false).build()
+            val request = ImageRequest.Builder(this@PlaybackService)
+                .data(url)
+                .size(512, 512)
+                .allowHardware(false)
+                .build()
             val result = imageLoader.execute(request)
             if (result is SuccessResult && artworkUrl == url) {
                 artwork = result.drawable.toBitmap()

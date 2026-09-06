@@ -3,17 +3,19 @@
 This directory builds the native Android client. One APK adapts to ordinary
 phones, Galaxy S24 Ultra-sized screens, landscape tablets, and wide Voyah Free
 displays. The UI is Jetpack Compose; authentication, Spotify Web API access,
-queue rules, audio processing, and Spotify Connect playback reuse the Rust
-modules in the repository root.
+audio processing, and Spotify Connect playback reuse the Rust modules in the
+repository root.
 
 ## User features
 
 - Spotify PKCE sign-in in the system browser. Fastpotify never receives the
   account password.
 - Real playlists, Liked Songs, albums, artists, podcasts, episodes, recent
-  history, top tracks, search results, and Spotify artwork.
+  history, top artists and tracks, Made for You playlists, recommendations,
+  search results, and Spotify artwork.
 - Local Premium playback through librespot, plus control and transfer of other
-  Spotify Connect devices.
+  Spotify Connect devices. When no player is active, the first requested song
+  guides the user through the separate playback grant and starts afterward.
 - Play, pause, previous, next, seek, volume, shuffle, repeat, queue, save,
   create playlist, add to playlist, and remove from playlist.
 - Background playback with Android MediaSession, foreground notification, and
@@ -27,6 +29,11 @@ Spotify Premium is required only for local playback. Browsing and search can
 still work for Free accounts. Spotify does not expose lossless playback,
 offline downloads, Smart Shuffle, or local-file playback to this client, so
 the Android build does not claim those capabilities.
+
+The maintained [desktop-to-Android functional audit](FUNCTIONAL_AUDIT.md)
+records what is fully ported, what is platform-specific, and which desktop
+features still have no Android UI. Release notes and the README must follow
+that matrix instead of treating a successful build as feature coverage.
 
 ## Build
 
