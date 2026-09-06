@@ -232,7 +232,16 @@ pub async fn wait_for_code_on(
         let _ = stream.write_all(response.as_bytes()).await;
         let _ = stream.shutdown().await;
         match outcome {
-            Ok(code) => return Ok(code),
+            Ok(code) => {
+                if completion_uri.is_some() {
+                    // Android starts the custom-scheme Activity asynchronously.
+                    // Let it become foreground before the caller performs DNS
+                    // and the token exchange. Some devices reject native DNS
+                    // while Chrome still owns the foreground network state.
+                    tokio::time::sleep(Duration::from_secs(2)).await;
+                }
+                return Ok(code);
+            }
             Err(error) => {
                 // A favicon request or a stale tab is not the redirect; keep waiting.
                 log::debug!("ignored request on the redirect listener: {error}");
@@ -330,7 +339,13 @@ async fn token_request(
         .form(form)
         .send()
         .await
-        .map_err(|error| TokenEndpointError::Unreachable(error.to_string()))?;
+        .map_err(|error| {
+            // The request body contains the one-time authorization code, so
+            // log only reqwest's error chain. It identifies DNS, TLS, connect,
+            // and timeout failures without exposing credentials.
+            log::warn!("Spotify token endpoint request failed: {error:?}");
+            TokenEndpointError::Unreachable(error.to_string())
+        })?;
     let status = response.status();
     let text = response.text().await.unwrap_or_default();
     if status.is_client_error() {

@@ -1740,7 +1740,7 @@ dependencies = [
 
 [[package]]
 name = "fastpotify"
-version = "0.6.0-android.7"
+version = "0.6.0-android.8"
 dependencies = [
  "aes",
  "anyhow",
@@ -1801,7 +1801,7 @@ dependencies = [
 
 [[package]]
 name = "fastpotify-android"
-version = "0.6.0-android.7"
+version = "0.6.0-android.8"
 dependencies = [
  "android_logger",
  "anyhow",
@@ -1814,7 +1814,7 @@ dependencies = [
 
 [[package]]
 name = "fastpotify-core"
-version = "0.6.0-android.7"
+version = "0.6.0-android.8"
 dependencies = [
  "anyhow",
  "base64",

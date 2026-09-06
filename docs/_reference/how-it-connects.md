@@ -27,7 +27,9 @@ browser. This keeps an already signed-in Spotify session from redirecting to
 `127.0.0.1` before the app is ready to receive its one-time code.
 After the code arrives, the loopback response opens
 `fastpotify://oauth-complete`, which resumes the existing Activity before the
-token exchange so Android cannot freeze that network request behind Chrome.
+token exchange. The listener briefly waits for the Activity to become
+foreground because Android can reject native DNS lookups during the handoff
+from Chrome.
 
 By default, Fastpotify uses the public app shared with spotify-player, ncspot,
 and Omarchy Spotify. Spotify divides its quota among all users. A personal app
