@@ -68,7 +68,10 @@ class ScreenshotTest {
         ActivityScenario.launch<MainActivity>(intent).use {
             assertTrue(
                 "Fastpotify UI did not become ready",
-                device.wait(Until.hasObject(By.textContains("Test Track")), 15_000),
+                // A cold CI emulator may still be finishing native library loading after
+                // the display profile changes. Keep the readiness assertion bounded, but
+                // allow the same startup budget as a real low-end Android device.
+                device.wait(Until.hasObject(By.textContains("Test Track")), 30_000),
             )
             device.waitForIdle()
             val bitmap = requireNotNull(instrumentation.uiAutomation.takeScreenshot())
