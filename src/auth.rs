@@ -167,7 +167,7 @@ pub async fn wait_for_code(
     cancel: watch::Receiver<bool>,
 ) -> Result<String> {
     let listener = bind_redirect_listener(port)?;
-    wait_for_code_on(listener, expected_state, cancel).await
+    wait_for_code_on(listener, expected_state, cancel, None).await
 }
 
 /// Binds the loopback redirect before the browser is opened.
@@ -189,6 +189,7 @@ pub async fn wait_for_code_on(
     listener: StdTcpListener,
     expected_state: &str,
     mut cancel: watch::Receiver<bool>,
+    completion_uri: Option<&str>,
 ) -> Result<String> {
     let listener =
         TcpListener::from_std(listener).context("unable to start the Spotify redirect listener")?;
@@ -215,8 +216,17 @@ pub async fn wait_for_code_on(
             Ok(_) => ("200 OK", success_page()),
             Err(error) => ("400 Bad Request", failure_page(&error.to_string())),
         };
+        let location = match (&outcome, completion_uri) {
+            (Ok(_), Some(uri)) => format!("Location: {uri}\r\n"),
+            _ => String::new(),
+        };
+        let status = if location.is_empty() {
+            status
+        } else {
+            "302 Found"
+        };
         let response = format!(
-            "HTTP/1.1 {status}\r\nContent-Type: text/html; charset=utf-8\r\nCache-Control: no-store\r\nConnection: close\r\nContent-Length: {}\r\n\r\n{body}",
+            "HTTP/1.1 {status}\r\n{location}Content-Type: text/html; charset=utf-8\r\nCache-Control: no-store\r\nConnection: close\r\nContent-Length: {}\r\n\r\n{body}",
             body.len()
         );
         let _ = stream.write_all(response.as_bytes()).await;
@@ -535,7 +545,7 @@ mod tests {
 
     #[tokio::test]
     async fn prebound_listener_keeps_an_immediate_redirect() {
-        use std::io::Write;
+        use std::io::{Read, Write};
 
         let listener = bind_redirect_listener(0).unwrap();
         let address = listener.local_addr().unwrap();
@@ -543,12 +553,27 @@ mod tests {
         browser
             .write_all(b"GET /login?code=ready&state=s1 HTTP/1.1\r\n\r\n")
             .unwrap();
+        let browser_response = std::thread::spawn(move || {
+            let mut response = String::new();
+            browser.read_to_string(&mut response).unwrap();
+            response
+        });
         let (_cancel_tx, cancel_rx) = watch::channel(false);
 
         assert_eq!(
-            wait_for_code_on(listener, "s1", cancel_rx).await.unwrap(),
+            wait_for_code_on(
+                listener,
+                "s1",
+                cancel_rx,
+                Some("fastpotify://oauth-complete"),
+            )
+            .await
+            .unwrap(),
             "ready"
         );
+        let response = browser_response.join().unwrap();
+        assert!(response.starts_with("HTTP/1.1 302 Found"));
+        assert!(response.contains("Location: fastpotify://oauth-complete"));
     }
 
     #[test]

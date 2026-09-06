@@ -30,6 +30,7 @@ const HTTP_CONNECT_TIMEOUT: Duration = Duration::from_secs(8);
 const HTTP_REQUEST_TIMEOUT: Duration = Duration::from_secs(20);
 const PLAYBACK_CONNECT_TIMEOUT: Duration = Duration::from_secs(45);
 const PLAYBACK_REGISTRATION_DELAY: Duration = Duration::from_millis(1_500);
+const ANDROID_OAUTH_COMPLETION_URI: &str = "fastpotify://oauth-complete";
 
 #[derive(Clone, Debug, Default, Deserialize, Serialize, PartialEq)]
 pub struct LiveSnapshot {
@@ -287,7 +288,13 @@ impl MobileClient {
         self.runtime.spawn(async move {
             let result = async {
                 let (_cancel_tx, cancel_rx) = tokio::sync::watch::channel(false);
-                let code = auth::wait_for_code_on(listener, &flow.state, cancel_rx).await?;
+                let code = auth::wait_for_code_on(
+                    listener,
+                    &flow.state,
+                    cancel_rx,
+                    Some(ANDROID_OAUTH_COMPLETION_URI),
+                )
+                .await?;
                 let response = auth::exchange_code(&http, &grant, &code, &flow.verifier).await?;
                 let token = StoredToken::from_response(&grant.client_id, response, None)?;
                 token.save(&token_path)?;
@@ -374,7 +381,13 @@ impl MobileClient {
         self.runtime.spawn(async move {
             let result = async {
                 let (_cancel_tx, cancel_rx) = tokio::sync::watch::channel(false);
-                let code = auth::wait_for_code_on(listener, &flow.state, cancel_rx).await?;
+                let code = auth::wait_for_code_on(
+                    listener,
+                    &flow.state,
+                    cancel_rx,
+                    Some(ANDROID_OAUTH_COMPLETION_URI),
+                )
+                .await?;
                 let token = auth::exchange_code(&http, &grant, &code, &flow.verifier).await?;
                 let cache = config.open_cache()?;
                 let credentials = Credentials::with_access_token(token.access_token);
