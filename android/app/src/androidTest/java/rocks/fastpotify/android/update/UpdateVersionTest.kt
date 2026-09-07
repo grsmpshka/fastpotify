@@ -9,7 +9,7 @@ class UpdateVersionTest {
     fun androidPreviewTagsProduceMonotonicVersionCodes() {
         assertEquals(600001, versionCodeFromTag("v0.6.0-android.1"))
         assertEquals(600002, versionCodeFromTag("v0.6.0-android.2"))
-        assertEquals(600009, versionCodeFromTag("v0.6.0-android.9"))
+        assertEquals(600010, versionCodeFromTag("v0.6.0-android.10"))
         assertEquals(701012, versionCodeFromTag("v0.7.1-android.12"))
         assertNull(versionCodeFromTag("v0.6.0"))
         assertNull(versionCodeFromTag("nightly"))

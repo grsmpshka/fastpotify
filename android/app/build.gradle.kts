@@ -14,8 +14,8 @@ android {
         applicationId = "rocks.fastpotify.android"
         minSdk = 26
         targetSdk = 35
-        versionCode = 600009
-        versionName = "0.6.0-android.9"
+        versionCode = 600010
+        versionName = "0.6.0-android.10"
 
         ndk {
             abiFilters += setOf("arm64-v8a", "x86_64")

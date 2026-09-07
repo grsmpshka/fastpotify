@@ -21,4 +21,4 @@ This Android preview completes the browser authorization handoff, restores local
 
 Thanks to the user who supplied the real-device recording that exposed the lost playback command and network stalls, and to the Fastpotify and librespot contributors whose shared client and playback engine power the app.
 
-Full changelog: `v0.6.0-android.4...v0.6.0-android.9`
+Full changelog: `v0.6.0-android.4...v0.6.0-android.10`
